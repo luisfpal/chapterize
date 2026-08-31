@@ -1,0 +1,10 @@
+{
+  "name": "chapterize",
+  "private": true,
+  "type": "module",
+  "workspaces": ["packages/*", "apps/*"],
+  "scripts": {
+    "test": "npm run test --workspace @chapterize/core",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  }
+}
