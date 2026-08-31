@@ -1,8 +1,12 @@
 import {
   openEpub, detect, toChapters, deriveTitles, renderChapter, chapterFilename,
-  mergeStubs, imageFilename, EpubError,
+  mergeStubs, imageFilename, countWords, readingMinutes, estimateTokens, EpubError,
 } from '@chapterize/core';
-import { native, bookFolderName, bytesOf, type Annotation, type BookIndex, type OutputFile } from './native';
+import type { CutPoint } from '@chapterize/core';
+import {
+  native, bookFolderName, bytesOf,
+  type Annotation, type BookIndex, type LoadedBook, type OutputFile,
+} from './native';
 
 /** A cover or half-title below this many characters is not a chapter. */
 const STUB_CHARS = 200;
@@ -63,15 +67,22 @@ export async function ingest(
   const dir = `${libraryDir}/${bookFolderName(book.metadata.title, book.metadata.author)}`;
   const files: OutputFile[] = [];
   const names: string[] = [];
+  const wordCounts: number[] = [];
   for (const chapter of chapters) {
     const name = chapterFilename(chapter, chapter.title);
     names.push(name);
+    const words = countWords(
+      book.blocks.slice(chapter.start, chapter.end).map((b) => b.text).join(' '),
+    );
+    wordCounts.push(words);
     files.push({
       name,
       contents: renderChapter(chapter, book.blocks, chapter.title, {
         bookTitle: book.metadata.title,
         ...(book.metadata.author !== undefined ? { author: book.metadata.author } : {}),
         totalChapters: chapters.length,
+        notes: book.notes,
+        minutes: readingMinutes(words),
       }),
     });
   }
@@ -84,7 +95,7 @@ export async function ingest(
   }
 
   const index: BookIndex = {
-    version: 1,
+    version: 2,
     title: book.metadata.title,
     ...(book.metadata.author !== undefined ? { author: book.metadata.author } : {}),
     epubFile: 'book.epub',
@@ -92,12 +103,17 @@ export async function ingest(
     chapters: chapters.map((c, i) => ({
       index: c.index, title: c.title, start: c.start, end: c.end, chars: c.chars,
       file: names[i] ?? '',
+      words: wordCounts[i] ?? 0,
+      approxTokens: estimateTokens(c.chars),
     })),
     progress: {},
     finished: [],
   };
   await native.writeText(`${dir}/index.json`, JSON.stringify(index, null, 2));
-  await native.writeText(`${dir}/annotations.json`, '[]');
+  const hasAnnotations = await native.readText(`${dir}/annotations.json`);
+  if (hasAnnotations === null) await native.writeText(`${dir}/annotations.json`, '[]');
+  // Created, never overwritten: this folder is the user's.
+  await native.ensureAnalysis(dir);
   // Skipped when re-splitting, where the source already is the library's copy.
   if (options.copySource !== false) await native.copyInto(epubPath, dir, 'book.epub');
 
@@ -124,7 +140,7 @@ export async function load(dir: string) {
     imageUrls.set(path, URL.createObjectURL(new Blob([copy.buffer as ArrayBuffer])));
   }
 
-  return { dir, index, blocks: book.blocks, annotations, imageUrls };
+  return { dir, index, blocks: book.blocks, annotations, imageUrls, notes: book.notes };
 }
 
 
@@ -163,4 +179,51 @@ export async function resplit(dir: string, libraryDir: string): Promise<IngestRe
   }
   await native.writeText(`${result.dir}/annotations.json`, JSON.stringify(reanchored, null, 2));
   return { ...result, orphaned };
+}
+
+/**
+ * Rewrite a book's chapters from cut points the user edited by hand.
+ *
+ * The same renderer the importer uses, so a hand-made boundary produces exactly
+ * the file an automatic one would. `analysis/` is untouched — the Rust side
+ * refuses to delete anything but `chapters/`.
+ */
+export async function saveSplit(
+  book: LoadedBook,
+  cuts: CutPoint[],
+): Promise<BookIndex> {
+  const chapters = toChapters(cuts, book.blocks);
+  const files: OutputFile[] = [];
+  const stored: BookIndex['chapters'] = [];
+
+  for (const [i, chapter] of chapters.entries()) {
+    const words = countWords(
+      book.blocks.slice(chapter.start, chapter.end).map((b) => b.text).join(' '),
+    );
+    const name = chapterFilename(chapter, chapter.title);
+    files.push({
+      name,
+      contents: renderChapter(chapter, book.blocks, chapter.title, {
+        bookTitle: book.index.title,
+        ...(book.index.author !== undefined ? { author: book.index.author } : {}),
+        totalChapters: chapters.length,
+        notes: book.notes,
+        minutes: readingMinutes(words),
+      }),
+    });
+    stored.push({
+      index: i, title: chapter.title, start: chapter.start, end: chapter.end,
+      chars: chapter.chars, file: name, words, approxTokens: estimateTokens(chapter.chars),
+    });
+  }
+
+  await native.writeChapters(book.dir, files);
+
+  // Progress and finished flags are chapter-indexed, and the indices just moved.
+  // Keeping them would mark the wrong chapters read, so they are dropped rather
+  // than silently misapplied.
+  const next: BookIndex = { ...book.index, version: 2, chapters: stored, progress: {}, finished: [] };
+  delete next.lastChapter;
+  await native.writeText(`${book.dir}/index.json`, JSON.stringify(next, null, 2));
+  return next;
 }

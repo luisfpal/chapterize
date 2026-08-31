@@ -322,3 +322,105 @@ kbd {
   background: var(--bg-panel); padding: 0.1em 0.3em; border-radius: 3px;
 }
 .reader-col sup, .reader-col sub { font-size: 0.72em; line-height: 0; }
+
+/* ── right-pane tabs ───────────────────────────────────────────────── */
+.tabs { display: flex; flex: 0 0 auto; border-bottom: 1px solid var(--border); }
+.tabs button {
+  flex: 1; background: none; border: 0; padding: 9px 6px;
+  font-size: 11px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase;
+  color: var(--text-faint); border-bottom: 2px solid transparent;
+}
+.tabs button:hover { background: var(--bg-hover); }
+.tabs button.on { color: var(--text); border-bottom-color: var(--accent); }
+.tabs b { font-weight: 600; color: var(--accent); margin-left: 3px; }
+
+/* ── analysis ──────────────────────────────────────────────────────── */
+.analysis-row {
+  display: block; width: 100%; text-align: left; background: none; border: 0;
+  padding: 9px 12px; border-bottom: 1px solid var(--border);
+}
+.analysis-row:hover { background: var(--bg-hover); }
+.analysis-row .t { display: block; font-size: 12.5px; word-break: break-word; }
+.analysis-row .meta { display: block; font-size: 10.5px; color: var(--text-faint); margin-top: 3px; }
+.analysis-doc { padding: 14px 14px 40px; font-size: 13px; line-height: 1.6; }
+.analysis-doc h1 { font-size: 17px; } .analysis-doc h2 { font-size: 15px; }
+.analysis-doc h3 { font-size: 13.5px; }
+.analysis-doc h1, .analysis-doc h2, .analysis-doc h3 { margin: 1.3em 0 0.5em; }
+.analysis-doc p, .analysis-doc li { margin: 0 0 0.8em; }
+.analysis-doc pre {
+  background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--r-md);
+  padding: 10px; overflow-x: auto; font-size: 11.5px;
+}
+.analysis-doc code { font-family: var(--mono-font); font-size: 0.9em; }
+.analysis-doc table { border-collapse: collapse; width: 100%; font-size: 12px; }
+.analysis-doc th, .analysis-doc td { border: 1px solid var(--border); padding: 5px 7px; text-align: left; }
+.analysis-doc blockquote {
+  margin: 0 0 0.9em; padding-left: 10px;
+  border-left: 2px solid var(--border-strong); color: var(--text-dim);
+}
+.diagram { margin: 1em 0; text-align: center; }
+.diagram svg { max-width: 100%; height: auto; }
+.diagram-error {
+  padding: 10px; border: 1px dashed var(--border-strong); border-radius: var(--r-md);
+  color: var(--text-faint); font-size: 11.5px;
+}
+.ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── split editing ─────────────────────────────────────────────────── */
+.chapter-row { border-bottom: 1px solid transparent; }
+.chapter-tools { display: flex; gap: 4px; padding: 0 12px 8px; }
+.reader-col.editing { position: relative; }
+.cutter {
+  display: block; width: 100%; background: none; border: 0;
+  padding: 5px 0; margin: 4px 0; text-align: center; opacity: 0.28;
+  border-top: 1px dashed var(--border-strong);
+  font-family: var(--ui-font); font-size: 10.5px;
+  letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-faint);
+  transition: opacity 100ms, border-color 100ms, color 100ms;
+}
+.cutter:hover { opacity: 1; border-top-color: var(--accent); color: var(--accent); }
+
+/* ── footnotes ─────────────────────────────────────────────────────── */
+sup.noteref {
+  cursor: pointer; color: var(--accent); font-weight: 700;
+  padding: 0 0.15em; border-radius: 2px;
+}
+sup.noteref:hover { background: var(--accent-soft); }
+.note-popup {
+  position: fixed; inset: 0; z-index: 60; display: flex;
+  align-items: center; justify-content: center;
+  background: color-mix(in srgb, #000 44%, transparent);
+}
+.note-popup-inner {
+  max-width: 560px; width: calc(100% - 60px); max-height: 70vh; overflow-y: auto;
+  background: var(--bg-raised); border: 1px solid var(--border-strong);
+  border-radius: var(--r-lg); box-shadow: var(--shadow);
+}
+.note-popup-inner p {
+  margin: 0; padding: 14px 16px 18px;
+  font-family: var(--reader-font); font-size: 14.5px; line-height: 1.6;
+}
+
+/* ── path bar ──────────────────────────────────────────────────────── */
+.pathbar {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 6px;
+  padding: 6px 12px; background: var(--bg-panel);
+  border-top: 1px solid var(--border);
+}
+.pathbar .label {
+  font-size: 10.5px; letter-spacing: 0.07em; text-transform: uppercase;
+  color: var(--text-faint); margin-right: 4px;
+}
+.flash { color: var(--accent); }
+
+/* ── fatal error ───────────────────────────────────────────────────── */
+.fatal { max-width: 760px; margin: 8vh auto; padding: 0 30px; }
+.fatal h1 { font-size: 18px; margin: 0 0 10px; }
+.fatal p { color: var(--text-dim); font-size: 13px; margin: 0 0 14px; }
+.fatal pre {
+  background: var(--bg-panel); border: 1px solid var(--border);
+  border-radius: var(--r-md); padding: 14px; overflow-x: auto;
+  font-family: var(--mono-font); font-size: 11.5px; line-height: 1.5;
+  white-space: pre-wrap; word-break: break-word;
+}
+.fatal .hint { margin-top: 14px; color: var(--text-faint); }

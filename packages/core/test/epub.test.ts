@@ -5,7 +5,7 @@ import { openEpub, resolvePath } from '../src/epub.js';
 import { detect, detectFromToc } from '../src/detect.js';
 import { toChapters, limitCount, mergeSmall, mergeStubs } from '../src/chapters.js';
 import { deriveTitles } from '../src/titles.js';
-import { inlineMarkdown, renderChapter } from '../src/markdown.js';
+import { inlineMarkdown, renderChapter, countWords, readingMinutes } from '../src/markdown.js';
 import { allBooks, libraryAvailable, loadBook } from './fixtures.js';
 
 describe('resolvePath', () => {
@@ -310,5 +310,56 @@ describe.runIf(libraryAvailable())('exported chapters are valid Markdown', () =>
       }));
     }
     expect(bad).toBe(0);
+  });
+});
+
+describe.runIf(libraryAvailable())('non-linear documents and footnotes', () => {
+  const book = openEpub(loadBook('Atomic Habits'));
+
+  it('keeps linear="no" documents out of the reading flow', () => {
+    // 35 of this book's 78 spine documents are one-note-per-file footnote
+    // holders marked linear="no". Folding them in put a chapter-1 footnote into
+    // the back matter as loose text thirty chapters away.
+    expect(book.spine.filter((s) => !s.linear).length).toBeGreaterThan(0);
+    expect(book.blocks.filter((b) => /Footnote/i.test(b.path))).toHaveLength(0);
+  });
+
+  it('captures note bodies so a reference can reach them', () => {
+    expect(book.notes.size).toBeGreaterThan(0);
+    expect(book.blocks.filter((b) => b.noterefs?.length).length).toBeGreaterThan(0);
+  });
+
+  it('every reference resolves to a real note', () => {
+    const refs = book.blocks.flatMap((b) => b.noterefs ?? []);
+    const unresolved = refs.filter((r) => !book.notes.has(r.key));
+    expect(unresolved).toHaveLength(0);
+  });
+
+  it('renders numbered Markdown footnotes with their text', () => {
+    const chapters = deriveTitles(
+      toChapters(mergeStubs(detect(book).cuts, book.blocks, 200), book.blocks), book.blocks,
+    );
+    const withNote = chapters.find((c) =>
+      book.blocks.slice(c.start, c.end).some((b) => b.noterefs?.length));
+    expect(withNote, 'a chapter containing a footnote').toBeDefined();
+
+    const md = renderChapter(withNote!, book.blocks, withNote!.title, {
+      bookTitle: book.metadata.title, totalChapters: chapters.length, notes: book.notes,
+    });
+    expect(md).toMatch(/\[\^1\]/);
+    expect(md).toMatch(/^\[\^1\]: \S/m);
+    // Numbering restarts per chapter, so a chapter read alone begins at 1.
+    expect(md).not.toMatch(/\[\^0\]/);
+    expect(md).not.toMatch(/^\[\^1\]: [*†]/m);
+  });
+});
+
+describe('reading time', () => {
+  it('counts words and converts at adult silent-reading speed', () => {
+    expect(countWords('  one two   three ')).toBe(3);
+    expect(countWords('')).toBe(0);
+    expect(readingMinutes(2380)).toBe(10);
+    // Never reports zero: a short chapter still costs the reader a moment.
+    expect(readingMinutes(5)).toBe(1);
   });
 });

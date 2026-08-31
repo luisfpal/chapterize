@@ -12,9 +12,12 @@
   "dependencies": {
     "@chapterize/core": "*",
     "@tauri-apps/api": "^2.9.0",
+    "@tauri-apps/plugin-clipboard-manager": "^2.3.3",
     "@tauri-apps/plugin-dialog": "^2.4.0",
     "@tauri-apps/plugin-fs": "^2.4.2",
     "@tauri-apps/plugin-opener": "^2.5.0",
+    "marked": "^15.0.0",
+    "mermaid": "^11.4.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },

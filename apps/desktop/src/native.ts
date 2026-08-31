@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { Block, Chapter } from '@chapterize/core';
+import type { Block } from '@chapterize/core';
 
 /** Everything the Rust side exposes, in one place, typed. */
 export const native = {
@@ -10,6 +10,10 @@ export const native = {
   writeText: (path: string, contents: string) => invoke<void>('write_text', { path, contents }),
   writeBytes: (path: string, contents: number[]) => invoke<void>('write_bytes', { path, contents }),
   writeChapters: (dir: string, files: OutputFile[]) => invoke<string>('write_chapters', { dir, files }),
+  /** Create `analysis/` with its README. Never overwrites anything present. */
+  ensureAnalysis: (dir: string) => invoke<string>('ensure_analysis', { dir }),
+  /** Markdown the user or their agents put in `analysis/`, newest first. */
+  listAnalysis: (dir: string) => invoke<AnalysisFile[]>('list_analysis', { dir }),
   copyInto: (source: string, dir: string, name: string) => invoke<string>('copy_into', { source, dir, name }),
   removeBook: (dir: string) => invoke<void>('remove_book', { dir }),
   listLibrary: (dir: string) => invoke<string[]>('list_library', { dir }),
@@ -18,6 +22,7 @@ export const native = {
 };
 
 export interface AppDirs { library: string; config: string }
+export interface AnalysisFile { name: string; path: string; size: number; modified: number }
 export interface OutputFile { name: string; contents: string }
 
 /** A highlight, anchored to our own block model rather than to CSS selectors. */
@@ -37,7 +42,7 @@ export interface Annotation {
 
 /** `index.json`: the durable description of a split book. Plain, greppable JSON. */
 export interface BookIndex {
-  version: 1;
+  version: 2;
   title: string;
   author?: string;
   epubFile: string;
@@ -45,6 +50,8 @@ export interface BookIndex {
   chapters: StoredChapter[];
   /** chapter index -> scroll fraction, so the reader resumes where you stopped. */
   progress: Record<string, number>;
+  /** Chapter last opened, so the book reopens where it was left. */
+  lastChapter?: number;
   finished: number[];
 }
 
@@ -55,6 +62,10 @@ export interface StoredChapter {
   end: number;
   chars: number;
   file: string;
+  /** Words of prose. Reading time derives from this. */
+  words: number;
+  /** Rough token estimate, for agents reading index.json. Never shown in the UI. */
+  approxTokens: number;
 }
 
 export interface LoadedBook {
@@ -64,17 +75,8 @@ export interface LoadedBook {
   annotations: Annotation[];
   /** Figure path inside the EPUB -> object URL the reader can display. */
   imageUrls: Map<string, string>;
-}
-
-export function toStored(chapters: Chapter[], titles: string[], files: string[]): StoredChapter[] {
-  return chapters.map((c, i) => ({
-    index: c.index,
-    title: titles[i] ?? c.title,
-    start: c.start,
-    end: c.end,
-    chars: c.chars,
-    file: files[i] ?? '',
-  }));
+  /** Footnote bodies by `path#id`, for the reader's note popups. */
+  notes: Map<string, string>;
 }
 
 export function bytesOf(numbers: number[]): Uint8Array {

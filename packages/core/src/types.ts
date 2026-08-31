@@ -42,6 +42,18 @@ export interface Block {
   image?: string;
   /** Alt text, when the source provided one. */
   alt?: string;
+  /**
+   * Footnote references found in this block, in order of appearance. The key is
+   * `path#id`, resolving into `Book.notes`.
+   */
+  noterefs?: NoteRef[];
+}
+
+export interface NoteRef {
+  /** The visible marker the author used — "*", "1", "†". */
+  label: string;
+  /** `path#id` of the note body. */
+  key: string;
 }
 
 /** Where a chapter begins. Auto-detection and manual edits both produce these. */
@@ -122,6 +134,15 @@ export interface Book {
   toc: TocEntry[];
   /** Image bytes by path, for the figures the blocks reference. */
   images: Map<string, Uint8Array>;
+  /**
+   * Footnote bodies by `path#id`.
+   *
+   * These live in spine documents marked `linear="no"` — EPUB's way of saying
+   * "not part of the reading flow". They are kept out of `blocks` so a note for
+   * chapter 1 cannot surface thirty chapters later as loose text, and are
+   * reachable only through the reference that points at them.
+   */
+  notes: Map<string, string>;
   /** How the TOC was obtained; 'none' when the book has neither nav nor NCX. */
   tocSource: 'nav' | 'ncx' | 'none';
 }

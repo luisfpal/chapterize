@@ -1,8 +1,29 @@
 import type { Block, Chapter } from './types.js';
 
-/** Rough token estimate. Labelled as approximate everywhere it surfaces. */
+/**
+ * Rough token estimate. Kept for `index.json`, where an agent may want it, and
+ * deliberately absent from the interface: no reading decision depends on it, and
+ * no open-source tokenizer matches Claude anyway.
+ */
 export function estimateTokens(chars: number): number {
   return Math.round(chars / 4);
+}
+
+/** Words, counted the way a reader would. */
+export function countWords(text: string): number {
+  const trimmed = text.trim();
+  return trimmed ? trimmed.split(/\s+/).length : 0;
+}
+
+/**
+ * Minutes to read, at `wpm`. This is what the interface shows.
+ *
+ * 238 wpm is the mean for adult silent reading of non-fiction prose (Brysbaert
+ * 2019). Every serious reader — Kindle, Kobo, Apple Books, Foliate — surfaces
+ * time rather than length, because time is the thing a reader actually budgets.
+ */
+export function readingMinutes(words: number, wpm = 238): number {
+  return Math.max(1, Math.round(words / wpm));
 }
 
 export function slugify(s: string, max = 60): string {
@@ -27,7 +48,16 @@ export function imageFilename(path: string): string {
   return path.split('/').pop() ?? path;
 }
 
-function renderBlock(block: Block): string {
+/** `<noteref>*</noteref>` -> `[^3]`, numbered per chapter. */
+function replaceNoterefs(html: string, numbers: number[]): string {
+  let i = 0;
+  return html.replace(/<noteref>[\s\S]*?<\/noteref>/g, () => {
+    const n = numbers[i++];
+    return n === undefined ? '' : `[^${n}]`;
+  });
+}
+
+function renderBlock(block: Block, noteNumbers?: number[]): string {
   if (block.image) {
     return `![${(block.alt ?? '').replace(/[[\]]/g, '')}](images/${imageFilename(block.image)})`;
   }
@@ -38,7 +68,8 @@ function renderBlock(block: Block): string {
   if (block.tag === 'pre') return '```\n' + block.text + '\n```';
   // Inline emphasis is carried through so exported prose keeps the author's
   // stress; the tag set is a fixed whitelist, so this cannot emit anything else.
-  return block.html ? inlineMarkdown(block.html) : block.text;
+  const html = noteNumbers ? replaceNoterefs(block.html, noteNumbers) : block.html;
+  return html ? inlineMarkdown(html) : block.text;
 }
 
 /**
@@ -72,6 +103,10 @@ export interface RenderOptions {
   totalChapters: number;
   /** Prepend a heading and provenance line, so a chapter read alone has context. */
   frontMatter?: boolean;
+  /** Footnote bodies by `path#id`, from `Book.notes`. */
+  notes?: Map<string, string>;
+  /** Minutes to read, shown in the provenance line. */
+  minutes?: number;
 }
 
 /**
@@ -87,19 +122,41 @@ export function renderChapter(
   options: RenderOptions,
 ): string {
   const body: string[] = [];
+  // Footnotes are numbered per chapter, so a chapter read on its own has
+  // markers starting at 1 rather than wherever it happened to fall in the book.
+  const definitions: string[] = [];
+  let counter = 0;
+
   for (let i = chapter.start; i < chapter.end; i++) {
-    const line = renderBlock(blocks[i]!);
+    const block = blocks[i]!;
+    let numbers: number[] | undefined;
+    if (block.noterefs?.length) {
+      numbers = block.noterefs.map((ref) => {
+        const n = ++counter;
+        const text = options.notes?.get(ref.key);
+        definitions.push(`[^${n}]: ${text ?? `(note "${ref.label}" not found in this book)`}`);
+        return n;
+      });
+    }
+    const line = renderBlock(block, numbers);
     if (line) body.push(line);
   }
 
-  if (options.frontMatter === false) return body.join('\n\n') + '\n';
+  const prose = definitions.length
+    ? `${body.join('\n\n')}\n\n${definitions.join('\n\n')}`
+    : body.join('\n\n');
+
+  if (options.frontMatter === false) return prose + '\n';
 
   const attribution = options.author
     ? `${options.bookTitle} — ${options.author}`
     : options.bookTitle;
+  const length = options.minutes !== undefined
+    ? `~${options.minutes} min read`
+    : `${chapter.chars.toLocaleString()} characters`;
   return [
     `# ${title}`,
-    `_${attribution} · chapter ${chapter.index} of ${options.totalChapters - 1} · ~${estimateTokens(chapter.chars).toLocaleString()} tokens (estimated)_`,
-    body.join('\n\n'),
+    `_${attribution} · ${chapter.index + 1} of ${options.totalChapters} · ${length}_`,
+    prose,
   ].join('\n\n') + '\n';
 }

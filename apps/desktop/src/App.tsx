@@ -3,7 +3,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { revealItemInDir } from '@tauri-apps/plugin-opener';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { listen } from '@tauri-apps/api/event';
-import { estimateTokens } from '@chapterize/core';
+import { readingMinutes } from '@chapterize/core';
 import { native, type AppDirs, type BookIndex, type LoadedBook } from './native';
 import { ingest, load, resplit } from './ingest';
 import { BookView } from './Book';
@@ -225,7 +225,8 @@ export function App() {
             <div className="section-title">{shelf.length} book{shelf.length === 1 ? '' : 's'}</div>
             <div className="grid">
               {shelf.map(({ dir, index }) => {
-                const tokens = index.chapters.reduce((sum, c) => sum + estimateTokens(c.chars), 0);
+                const minutes = index.chapters.reduce((sum, c) => sum + readingMinutes(c.words ?? 0), 0);
+                const hours = Math.round(minutes / 60);
                 const pct = Math.round((index.finished.length / Math.max(1, index.chapters.length)) * 100);
                 return (
                   <div key={dir} className="card book">
@@ -233,7 +234,7 @@ export function App() {
                       <div className="title">{index.title}</div>
                       <div className="author">{index.author ?? '—'}</div>
                       <div className="stats">
-                        {index.chapters.length} chapters · ≈{(tokens / 1000).toFixed(0)}k tokens
+                        {index.chapters.length} chapters · {hours >= 1 ? `${hours} h` : `${minutes} min`}
                       </div>
                       <div className="bar"><span style={{ width: `${pct}%` }} /></div>
                       <div className="stats">{index.finished.length} of {index.chapters.length} read</div>

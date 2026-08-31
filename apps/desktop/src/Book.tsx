@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { Block } from '@chapterize/core';
-import { estimateTokens } from '@chapterize/core';
+import type { Block, CutPoint } from '@chapterize/core';
+import { readingMinutes, splitAt, mergeUp, retitle } from '@chapterize/core';
+import { writeText as copyToClipboard } from '@tauri-apps/plugin-clipboard-manager';
+import { revealItemInDir } from '@tauri-apps/plugin-opener';
 import { native, type Annotation, type BookIndex, type LoadedBook } from './native';
+import { saveSplit } from './ingest';
+import { Analysis } from './Analysis';
 
 const COLORS = [1, 2, 3, 4] as const;
 
@@ -88,6 +92,7 @@ function renderRun(run: Run, key: number) {
     else if (tag === 'sub') node = <sub>{node}</sub>;
     else if (tag === 'code') node = <code>{node}</code>;
     else if (tag === 'u') node = <u>{node}</u>;
+    else if (tag === 'noteref') node = <>{node}</>;
     else node = <span>{node}</span>;
   }
   return run.mark
@@ -96,8 +101,12 @@ function renderRun(run: Run, key: number) {
 }
 
 function BlockView({
-  block, index, marks, imageUrls,
-}: { block: Block; index: number; marks: Annotation[]; imageUrls: Map<string, string> }) {
+  block, index, marks, imageUrls, onNote,
+}: {
+  block: Block; index: number; marks: Annotation[];
+  imageUrls: Map<string, string>;
+  onNote: (key: string) => void;
+}) {
   if (block.image) {
     const src = imageUrls.get(block.image);
     return (
@@ -110,7 +119,18 @@ function BlockView({
     );
   }
 
-  const content = runs(block.html || block.text, block.text, marks).map(renderRun);
+  let noteSeq = 0;
+  const content = runs(block.html || block.text, block.text, marks).map((run, i) => {
+    if (!run.tags.includes('noteref')) return renderRun(run, i);
+    const ref = block.noterefs?.[noteSeq++];
+    return (
+      <sup key={i} className="noteref" role="button" tabIndex={0}
+           title="Show this footnote"
+           onClick={(e) => { e.stopPropagation(); if (ref) onNote(ref.key); }}>
+        {run.text}
+      </sup>
+    );
+  });
   const props = { 'data-block': index };
   if (block.heading === 1) return <h1 {...props}>{content}</h1>;
   if (block.heading === 2) return <h2 {...props}>{content}</h2>;
@@ -175,22 +195,28 @@ interface Props {
 export function BookView({ book, onBack, onExport }: Props) {
   const [index, setIndex] = useState<BookIndex>(book.index);
   const [annotations, setAnnotations] = useState<Annotation[]>(book.annotations);
-  const [current, setCurrent] = useState(firstUnread(book.index));
+  const [current, setCurrent] = useState(() => resumeAt(book.index));
   const [pending, setPending] = useState<Omit<Annotation, 'note'> | null>(null);
   const [draft, setDraft] = useState('');
   const [size, setSize] = useState(18);
   const [widths, setWidths] = useState(loadWidths);
+  const [tab, setTab] = useState<'notes' | 'analysis'>('notes');
+  const [editing, setEditing] = useState(false);
+  const [cuts, setCuts] = useState<CutPoint[] | null>(null);
+  const [history, setHistory] = useState<CutPoint[][]>([]);
+  const [note, setNote] = useState<{ key: string; text: string } | null>(null);
+  const [flash, setFlash] = useState('');
   const readerRef = useRef<HTMLDivElement>(null);
 
+  const chapter = index.chapters[current];
+
   const setPane = useCallback((side: 'left' | 'right', next: number) => {
-    setWidths((current) => {
-      const updated = { ...current, [side]: next };
+    setWidths((c) => {
+      const updated = { ...c, [side]: next };
       localStorage.setItem(WIDTH_KEY, JSON.stringify(updated));
       return updated;
     });
   }, []);
-
-  const chapter = index.chapters[current];
 
   const save = useCallback(async (next: Annotation[]) => {
     setAnnotations(next);
@@ -202,8 +228,51 @@ export function BookView({ book, onBack, onExport }: Props) {
     await native.writeText(`${book.dir}/index.json`, JSON.stringify(next, null, 2));
   }, [book.dir]);
 
-  // Reset scroll when the chapter changes; a reader should never open mid-page.
-  useEffect(() => { readerRef.current?.scrollTo({ top: 0 }); }, [current]);
+  const say = useCallback((message: string) => {
+    setFlash(message);
+    window.setTimeout(() => setFlash(''), 2600);
+  }, []);
+
+  /* ── reading position ────────────────────────────────────────────── */
+
+  // Restore on chapter change; a reader that always opens at the top forgets
+  // where you were, which is the whole point of tracking progress.
+  useEffect(() => {
+    const pane = readerRef.current;
+    if (!pane) return;
+    const fraction = index.progress[String(current)] ?? 0;
+    requestAnimationFrame(() => {
+      pane.scrollTop = fraction * Math.max(1, pane.scrollHeight - pane.clientHeight);
+    });
+  }, [current, index.progress]);
+
+  // Persist on a timer rather than on every scroll event, so reading a chapter
+  // is not thousands of writes to index.json.
+  useEffect(() => {
+    const pane = readerRef.current;
+    if (!pane || editing) return;
+    let timer = 0;
+    const onScroll = (): void => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        const span = Math.max(1, pane.scrollHeight - pane.clientHeight);
+        const fraction = Math.min(1, Math.max(0, pane.scrollTop / span));
+        setIndex((prev) => {
+          const next: BookIndex = {
+            ...prev,
+            progress: { ...prev.progress, [String(current)]: fraction },
+            lastChapter: current,
+          };
+          void native.writeText(`${book.dir}/index.json`, JSON.stringify(next, null, 2));
+          return next;
+        });
+      }, 800);
+    };
+    pane.addEventListener('scroll', onScroll, { passive: true });
+    return () => { pane.removeEventListener('scroll', onScroll); window.clearTimeout(timer); };
+  }, [book.dir, current, editing]);
+
+  /* ── annotations ─────────────────────────────────────────────────── */
 
   const chapterAnnotations = useMemo(
     () => chapter
@@ -222,26 +291,26 @@ export function BookView({ book, onBack, onExport }: Props) {
   }, [chapterAnnotations]);
 
   const capture = useCallback(() => {
+    if (editing) return;
     const selection = window.getSelection();
     if (!selection || selection.isCollapsed) return;
     const text = selection.toString().trim();
     if (!text) return;
-
     const anchor = selection.anchorNode;
     const host = (anchor instanceof Element ? anchor : anchor?.parentElement)?.closest('[data-block]');
     if (!host) return;
-    const block = Number(host.getAttribute('data-block'));
     const range = selection.getRangeAt(0);
     const start = offsetWithin(host, range.startContainer, range.startOffset);
     const end = offsetWithin(host, range.endContainer, range.endOffset);
     if (end <= start) return;
-
     setPending({
       id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
-      block, start, end, quote: text, color: 1, createdAt: new Date().toISOString(),
+      block: Number(host.getAttribute('data-block')),
+      start, end, quote: text, color: 1, createdAt: new Date().toISOString(),
     });
     setDraft('');
-  }, []);
+    setTab('notes');
+  }, [editing]);
 
   const commit = useCallback(async (color: Annotation['color']) => {
     if (!pending) return;
@@ -250,6 +319,67 @@ export function BookView({ book, onBack, onExport }: Props) {
     setDraft('');
     window.getSelection()?.removeAllRanges();
   }, [annotations, draft, pending, save]);
+
+  /* ── split editing ───────────────────────────────────────────────── */
+
+  const enterEdit = useCallback(() => {
+    setCuts(index.chapters.map((c) => ({
+      at: c.start, title: c.title, source: 'manual' as const, depth: 0,
+    })));
+    setHistory([]);
+    setEditing(true);
+  }, [index.chapters]);
+
+  const apply = useCallback((next: CutPoint[]) => {
+    setCuts((prev) => {
+      if (prev) setHistory((h) => [...h.slice(-49), prev]);
+      return next;
+    });
+  }, []);
+
+  const undo = useCallback(() => {
+    setHistory((h) => {
+      const last = h[h.length - 1];
+      if (last) setCuts(last);
+      return h.slice(0, -1);
+    });
+  }, []);
+
+  const commitSplit = useCallback(async () => {
+    if (!cuts) return;
+    try {
+      const next = await saveSplit(book, cuts);
+      setIndex(next);
+      setCurrent((c) => Math.min(c, next.chapters.length - 1));
+      setEditing(false);
+      setCuts(null);
+      setHistory([]);
+      say(`Saved — ${next.chapters.length} chapters rewritten. analysis/ untouched.`);
+    } catch (e) {
+      say(e instanceof Error ? e.message : String(e));
+    }
+  }, [book, cuts, say]);
+
+  /* ── paths for agents ────────────────────────────────────────────── */
+
+  const copy = useCallback(async (value: string, label: string) => {
+    await copyToClipboard(value);
+    say(`Copied ${label}`);
+  }, [say]);
+
+  const agentPrompt = useCallback(() => {
+    if (!chapter) return '';
+    return [
+      `Book: ${index.title}${index.author ? ` — ${index.author}` : ''}`,
+      `Chapter: ${chapter.title}  (~${readingMinutes(chapter.words)} min)`,
+      `Read:  ${book.dir}/chapters/${chapter.file}`,
+      `Write: ${book.dir}/analysis/`,
+      '',
+      `Name what you write ${String(chapter.index).padStart(3, '0')}-<what-it-is>.md so it appears beside this chapter.`,
+    ].join('\n');
+  }, [book.dir, chapter, index.author, index.title]);
+
+  /* ── keyboard ────────────────────────────────────────────────────── */
 
   const go = useCallback((delta: number) => {
     setCurrent((c) => Math.min(index.chapters.length - 1, Math.max(0, c + delta)));
@@ -269,17 +399,30 @@ export function BookView({ book, onBack, onExport }: Props) {
       else if (e.key === 'p') go(-1);
       else if (e.key === 'j') readerRef.current?.scrollBy({ top: 120 });
       else if (e.key === 'k') readerRef.current?.scrollBy({ top: -120 });
-      else if (e.key === 'h') capture();
-      else if (e.key === 'm') void toggleFinished();
-      else if (e.key === 'Escape') { setPending(null); onBack(); }
-      else if (e.key === '=' || e.key === '+') setSize((s) => Math.min(26, s + 1));
-      else if (e.key === '-') setSize((s) => Math.max(13, s - 1));
+      else if (e.key === 'h' && !editing) capture();
+      else if (e.key === 'm' && !editing) void toggleFinished();
+      else if (e.key === 'e') editing ? setEditing(false) : enterEdit();
+      else if (e.key === 'u' && editing) undo();
+      else if (e.key === 'Escape') {
+        if (note) setNote(null);
+        else if (pending) setPending(null);
+        else if (editing) { setEditing(false); setCuts(null); }
+        else onBack();
+      }
+      else if (e.key === '=' || e.key === '+') setSize((v) => Math.min(26, v + 1));
+      else if (e.key === '-') setSize((v) => Math.max(13, v - 1));
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [capture, go, onBack, toggleFinished]);
+  }, [capture, editing, enterEdit, go, note, onBack, pending, toggleFinished, undo]);
 
   if (!chapter) return <div className="empty">This book has no chapters.</div>;
+
+  // One shape for the list whichever mode is active, so the row does not have to
+  // discriminate a union while rendering.
+  const rows: { title: string; detail: string }[] = editing && cuts
+    ? cuts.map((c) => ({ title: c.title, detail: `block ${c.at}` }))
+    : index.chapters.map((c) => ({ title: c.title, detail: `~${readingMinutes(c.words)} min` }));
 
   return (
     <>
@@ -288,34 +431,57 @@ export function BookView({ book, onBack, onExport }: Props) {
         <h1>{index.title}</h1>
         <span className="sub">{index.author}</span>
         <span className="spacer" />
-        <button className="btn ghost" onClick={() => setSize((s) => Math.max(13, s - 1))}>A−</button>
-        <button className="btn ghost" onClick={() => setSize((s) => Math.min(26, s + 1))}>A+</button>
-        <button className="btn" onClick={() => onExport(current)}>Export chapter</button>
-        <button className="btn primary" onClick={() => onExport('all')}>Export all</button>
+        {flash && <span className="sub flash">{flash}</span>}
+        {editing ? (
+          <>
+            <button className="btn ghost" disabled={!history.length} onClick={undo} title="Undo (u)">Undo</button>
+            <button className="btn" onClick={() => { setEditing(false); setCuts(null); }}>Cancel</button>
+            <button className="btn primary" onClick={() => void commitSplit()}>Save split</button>
+          </>
+        ) : (
+          <>
+            <button className="btn ghost" onClick={() => setSize((v) => Math.max(13, v - 1))}>A−</button>
+            <button className="btn ghost" onClick={() => setSize((v) => Math.min(26, v + 1))}>A+</button>
+            <button className="btn" onClick={enterEdit} title="Edit chapter boundaries (e)">Edit split</button>
+            <button className="btn" onClick={() => onExport(current)}>Export chapter</button>
+            <button className="btn primary" onClick={() => onExport('all')}>Export all</button>
+          </>
+        )}
       </div>
 
       <div className="panes">
         <div className="pane left" style={{ flexBasis: widths.left }}>
           <div className="pane-head">
-            Chapters
-            <span className="spacer" />
-            <span>{index.finished.length}/{index.chapters.length} read</span>
+            Chapters<span className="spacer" />
+            {editing ? `${cuts?.length ?? 0} after edit` : `${index.finished.length}/${index.chapters.length} read`}
           </div>
           <div className="pane-body">
-            {index.chapters.map((c, i) => (
-              <button
-                key={c.index}
-                className={`chapter${index.finished.includes(i) ? ' read' : ''}`}
-                aria-current={i === current}
-                onClick={() => setCurrent(i)}
-              >
-                <span className="t">
-                  {index.finished.includes(i) && <span className="dot" />}
-                  {c.title}
-                </span>
-                <span className="n">{String(c.index).padStart(3, '0')}</span>
-                <span className="meta">≈{estimateTokens(c.chars).toLocaleString()} tokens</span>
-              </button>
+            {rows.map((c, i) => (
+              <div key={i} className="chapter-row">
+                <button
+                  className={`chapter${!editing && index.finished.includes(i) ? ' read' : ''}`}
+                  aria-current={i === current}
+                  onClick={() => setCurrent(i)}
+                >
+                  <span className="t">
+                    {!editing && index.finished.includes(i) && <span className="dot" />}
+                    {c.title}
+                  </span>
+                  <span className="n">{String(i).padStart(3, '0')}</span>
+                  <span className="meta">{c.detail}</span>
+                </button>
+                {editing && i > 0 && cuts && (
+                  <div className="chapter-tools">
+                    <button className="btn ghost tiny" title="Merge into the chapter above (m)"
+                            onClick={() => apply(mergeUp(cuts, i))}>Merge up</button>
+                    <button className="btn ghost tiny" title="Rename"
+                            onClick={() => {
+                              const name = window.prompt('Chapter title', c.title);
+                              if (name !== null) apply(retitle(cuts, i, name.trim() || c.title));
+                            }}>Rename</button>
+                  </div>
+                )}
+              </div>
             ))}
           </div>
         </div>
@@ -329,19 +495,29 @@ export function BookView({ book, onBack, onExport }: Props) {
                 <h2>{chapter.title}</h2>
                 <div className="prov">
                   {chapter.index + 1} of {index.chapters.length} in reading order ·
-                  {' '}≈{estimateTokens(chapter.chars).toLocaleString()} tokens (estimated)
+                  {' '}~{readingMinutes(chapter.words)} min read
                 </div>
               </div>
-              <div className="reader-col">
-                {book.blocks.slice(chapter.start, chapter.end).map((b, i) => (
-                  <BlockView
-                    key={chapter.start + i}
-                    block={b}
-                    index={chapter.start + i}
-                    marks={byBlock.get(chapter.start + i) ?? []}
-                    imageUrls={book.imageUrls}
-                  />
-                ))}
+              <div className={`reader-col${editing ? ' editing' : ''}`}>
+                {book.blocks.slice(chapter.start, chapter.end).map((b, i) => {
+                  const at = chapter.start + i;
+                  return (
+                    <div key={at}>
+                      {editing && cuts && i > 0 && (
+                        <button className="cutter" title={`Start a new chapter here (block ${at})`}
+                                onClick={() => apply(splitAt(cuts, at, 'Untitled'))}>
+                          <span>split here</span>
+                        </button>
+                      )}
+                      <BlockView
+                        block={b} index={at}
+                        marks={byBlock.get(at) ?? []}
+                        imageUrls={book.imageUrls}
+                        onNote={(key) => setNote({ key, text: book.notes.get(key) ?? 'Note not found.' })}
+                      />
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -350,65 +526,101 @@ export function BookView({ book, onBack, onExport }: Props) {
         <Resizer side="right" width={widths.right} onChange={(n) => setPane('right', n)} />
 
         <div className="pane right" style={{ flexBasis: widths.right }}>
-          <div className="pane-head">
-            Notes<span className="spacer" />{chapterAnnotations.length}
+          <div className="tabs">
+            <button className={tab === 'notes' ? 'on' : ''} onClick={() => setTab('notes')}>
+              Notes {chapterAnnotations.length > 0 && <b>{chapterAnnotations.length}</b>}
+            </button>
+            <button className={tab === 'analysis' ? 'on' : ''} onClick={() => setTab('analysis')}>
+              Analysis
+            </button>
           </div>
-          <div className="pane-body">
-            {pending && (
-              <div className="field">
-                <label>New highlight</label>
-                <div className="note" style={{ padding: 0, border: 0, cursor: 'default' }}>
+
+          {tab === 'analysis' ? (
+            <Analysis dir={book.dir} chapterIndex={chapter.index} />
+          ) : (
+            <div className="pane-body">
+              {pending && (
+                <div className="field">
+                  <label>New highlight</label>
                   <div className="quote">{pending.quote}</div>
+                  <textarea autoFocus placeholder="Why does this matter? (optional)"
+                            value={draft} onChange={(e) => setDraft(e.target.value)}
+                            style={{ marginTop: 8 }} />
+                  <div className="row" style={{ marginTop: 8 }}>
+                    {COLORS.map((c) => (
+                      <button key={c} className="btn" title={`Save with colour ${c}`}
+                              onClick={() => void commit(c)}
+                              style={{ background: `var(--hl-${c})`, width: 30, height: 26 }} />
+                    ))}
+                    <span className="spacer" />
+                    <button className="btn ghost" onClick={() => setPending(null)}>Cancel</button>
+                  </div>
                 </div>
-                <textarea
-                  autoFocus
-                  placeholder="Why does this matter? (optional)"
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  style={{ marginTop: 8 }}
-                />
-                <div className="row" style={{ marginTop: 8 }}>
-                  {COLORS.map((c) => (
-                    <button
-                      key={c}
-                      className="btn"
-                      title={`Save with colour ${c}`}
-                      onClick={() => void commit(c)}
-                      style={{ background: `var(--hl-${c})`, width: 30, height: 26 }}
-                    />
-                  ))}
-                  <span className="spacer" />
-                  <button className="btn ghost" onClick={() => setPending(null)}>Cancel</button>
+              )}
+              {!pending && chapterAnnotations.length === 0 && (
+                <div className="empty">Select text in the chapter to highlight it.</div>
+              )}
+              {chapterAnnotations.map((a) => (
+                <div key={a.id} className="note" title="Click to delete"
+                     onClick={() => void save(annotations.filter((x) => x.id !== a.id))}>
+                  <div className="quote" style={{ borderLeftColor: `var(--hl-${a.color})` }}>{a.quote}</div>
+                  {a.note && <div className="body">{a.note}</div>}
                 </div>
-              </div>
-            )}
-            {!pending && chapterAnnotations.length === 0 && (
-              <div className="empty">Select text in the chapter to highlight it.</div>
-            )}
-            {chapterAnnotations.map((a) => (
-              <div key={a.id} className="note" onClick={() => void save(annotations.filter((x) => x.id !== a.id))}
-                   title="Click to delete">
-                <div className="quote" style={{ borderLeftColor: `var(--hl-${a.color})` }}>{a.quote}</div>
-                {a.note && <div className="body">{a.note}</div>}
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
+      </div>
+
+      <div className="pathbar">
+        <span className="label">Paths for agents</span>
+        <button className="btn ghost tiny" onClick={() => void copy(`${book.dir}/chapters/${chapter.file}`, 'this chapter’s path')}>
+          this chapter
+        </button>
+        <button className="btn ghost tiny" onClick={() => void copy(`${book.dir}/chapters`, 'chapters/ path')}>
+          chapters/
+        </button>
+        <button className="btn ghost tiny" onClick={() => void copy(`${book.dir}/analysis`, 'analysis/ path')}>
+          analysis/
+        </button>
+        <button className="btn tiny" onClick={() => void copy(agentPrompt(), 'a ready prompt')}>
+          Copy prompt for agent
+        </button>
+        <span className="spacer" />
+        <button className="btn ghost tiny" onClick={() => void revealItemInDir(`${book.dir}/index.json`)}>
+          Open folder
+        </button>
       </div>
 
       <div className="keys">
         <span><kbd>j</kbd><kbd>k</kbd> scroll</span>
         <span><kbd>n</kbd><kbd>p</kbd> chapter</span>
-        <span><kbd>h</kbd> highlight selection</span>
-        <span><kbd>m</kbd> mark read</span>
-        <span><kbd>−</kbd><kbd>+</kbd> text size</span>
-        <span><kbd>Esc</kbd> library</span>
+        {editing
+          ? <><span><kbd>u</kbd> undo</span><span><kbd>e</kbd> leave edit</span></>
+          : <><span><kbd>h</kbd> highlight</span><span><kbd>m</kbd> mark read</span><span><kbd>e</kbd> edit split</span></>}
+        <span><kbd>−</kbd><kbd>+</kbd> size</span>
+        <span><kbd>Esc</kbd> back</span>
       </div>
+
+      {note && (
+        <div className="note-popup" role="dialog" onClick={() => setNote(null)}>
+          <div className="note-popup-inner" onClick={(e) => e.stopPropagation()}>
+            <div className="pane-head">Footnote<span className="spacer" />
+              <button className="btn ghost tiny" onClick={() => setNote(null)}>Close</button>
+            </div>
+            <p>{note.text}</p>
+          </div>
+        </div>
+      )}
     </>
   );
 }
 
-function firstUnread(index: BookIndex): number {
+/** Reopen where the reader stopped, else the first unread chapter. */
+function resumeAt(index: BookIndex): number {
+  if (index.lastChapter !== undefined && index.chapters[index.lastChapter]) {
+    return index.lastChapter;
+  }
   for (let i = 0; i < index.chapters.length; i++) {
     if (!index.finished.includes(i)) return i;
   }

@@ -92,6 +92,23 @@ to need one, the block model is wrong and that is the thing to fix.
 - Ship the full `hicolor` icon size range. GNOME picks different sizes for the
   dock, the grid, and the window list, and a missing size renders blurry.
 
+## Verifying on this machine — hard-won
+
+- **`import`/`xwd` cannot capture a WebKitGTK window.** They return a single
+  uniform colour while the app renders perfectly. Use `gnome-screenshot -w`, and
+  never conclude "blank window" from an `import` capture.
+- **A locked screen stops the webview painting.** Every capture looks empty. Check
+  the session is unlocked before trusting any screenshot.
+- **Synthetic X events do not reach WebKit** for text selection, drag, or Ctrl+C.
+  An empty clipboard proves nothing about the DOM.
+- When pixels are in doubt, ask the DOM: a temporary Tauri `eval` reporting
+  `styleSheets.length`, `scripts.length` and `body.innerText.length` settles in one
+  run what six rebuilds of guessing cannot. Remove it afterwards — it is an eval
+  backdoor, not a feature.
+- **Run `cargo test` before `tauri build`, never after.** Testing in release mode
+  rebuilds the binary after the bundler packaged it, leaving a `.deb` whose payload
+  is older than the binary beside it.
+
 ## Verification
 
 `npm test` runs against the user's **real library** under

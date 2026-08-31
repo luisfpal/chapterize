@@ -7,9 +7,17 @@
 
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tauri::{Emitter, Manager};
+
+#[derive(Serialize)]
+pub struct AnalysisFile {
+    name: String,
+    path: String,
+    size: u64,
+    modified: u64,
+}
 
 #[derive(Serialize)]
 pub struct AppDirs {
@@ -88,6 +96,93 @@ fn write_text(path: String, contents: String) -> Result<(), String> {
     fs::write(&path, contents).map_err(|e| format!("Cannot write {}: {e}", path.display()))
 }
 
+/// Directories the application generates and may therefore destroy.
+///
+/// Anything else — above all `analysis/`, which holds work the user and their
+/// agents produced and which nothing here can reproduce — must be unreachable
+/// from a recursive delete. Deleting the user's own work is the worst thing this
+/// program could do, so the rule is enforced here rather than trusted to callers.
+const DELETABLE: [&str; 1] = ["chapters"];
+
+fn refuse_unless_generated(path: &Path) -> Result<(), String> {
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    if !DELETABLE.contains(&name) {
+        return Err(format!(
+            "Refusing to delete {}: only {:?} are generated directories. \
+             Everything else, including analysis/, belongs to you.",
+            path.display(),
+            DELETABLE,
+        ));
+    }
+    Ok(())
+}
+
+/// Create `analysis/` and explain, in the folder itself, that it is the user's.
+#[tauri::command]
+fn ensure_analysis(dir: String) -> Result<String, String> {
+    let analysis = expand(&dir).join("analysis");
+    fs::create_dir_all(&analysis)
+        .map_err(|e| format!("Cannot create {}: {e}", analysis.display()))?;
+    let readme = analysis.join("README.md");
+    if !readme.exists() {
+        fs::write(&readme, ANALYSIS_README)
+            .map_err(|e| format!("Cannot write {}: {e}", readme.display()))?;
+    }
+    Ok(analysis.to_string_lossy().into_owned())
+}
+
+const ANALYSIS_README: &str = "\
+# analysis/
+
+This folder is yours. Chapterize reads it and shows what is here beside the
+chapter it belongs to. It never writes into it and never deletes from it — not
+even when you re-split the book, which erases and rebuilds `../chapters/`.
+
+Put anything here: summaries, diagrams, argument maps, NotebookLM exports, your
+own notes. Markdown files are rendered in the app's Analysis tab.
+
+A convention that makes files line up with chapters, though nothing enforces it:
+
+    007-law-7-....summary.md      any name starting with the chapter number
+    007-law-7-....diagram.md      is shown under that chapter
+    reading-notes.md              anything else is shown under the book
+";
+
+/// Markdown files in `analysis/`, newest first, with sizes.
+#[tauri::command]
+fn list_analysis(dir: String) -> Result<Vec<AnalysisFile>, String> {
+    let analysis = expand(&dir).join("analysis");
+    if !analysis.is_dir() {
+        return Ok(Vec::new());
+    }
+    let mut out = Vec::new();
+    for entry in fs::read_dir(&analysis).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let path = entry.path();
+        let is_markdown = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| e.eq_ignore_ascii_case("md") || e.eq_ignore_ascii_case("markdown"));
+        if !is_markdown {
+            continue;
+        }
+        let meta = entry.metadata().map_err(|e| e.to_string())?;
+        out.push(AnalysisFile {
+            name: path.file_name().and_then(|n| n.to_str()).unwrap_or_default().to_string(),
+            path: path.to_string_lossy().into_owned(),
+            size: meta.len(),
+            modified: meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs())
+                .unwrap_or(0),
+        });
+    }
+    out.sort_by(|a, b| b.modified.cmp(&a.modified));
+    Ok(out)
+}
+
 /// Write a book's chapter files into `dir/chapters`, replacing what is there.
 ///
 /// The directory is emptied first so that re-splitting a book with different cut
@@ -95,6 +190,7 @@ fn write_text(path: String, contents: String) -> Result<(), String> {
 #[tauri::command]
 fn write_chapters(dir: String, files: Vec<OutputFile>) -> Result<String, String> {
     let base = expand(&dir).join("chapters");
+    refuse_unless_generated(&base)?;
     if base.exists() {
         fs::remove_dir_all(&base).map_err(|e| format!("Cannot clear {}: {e}", base.display()))?;
     }
@@ -223,6 +319,7 @@ pub fn run() {
         }))
         .manage(PendingFiles(Mutex::new(epubs_from_args(std::env::args()))))
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .invoke_handler(tauri::generate_handler![
@@ -232,6 +329,8 @@ pub fn run() {
             write_text,
             write_bytes,
             write_chapters,
+            ensure_analysis,
+            list_analysis,
             copy_into,
             remove_book,
             list_library,
@@ -285,6 +384,61 @@ mod tests {
         .unwrap();
 
         assert_eq!(fs::read(target.join("book.epub")).unwrap(), b"contents");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The single most destructive thing this program could do is delete work
+    /// the user cannot reproduce. `analysis/` holds exactly that.
+    #[test]
+    fn analysis_is_never_deletable() {
+        let dir = std::env::temp_dir().join(format!("chapterize-analysis-{}", std::process::id()));
+        for name in ["analysis", "notes", "..", "book.epub", ""] {
+            let target = dir.join(name);
+            assert!(
+                refuse_unless_generated(&target).is_err(),
+                "{name:?} must not be deletable"
+            );
+        }
+        assert!(refuse_unless_generated(&dir.join("chapters")).is_ok());
+    }
+
+    /// Re-splitting erases and rebuilds chapters/. It must not reach sideways.
+    #[test]
+    fn write_chapters_leaves_analysis_untouched() {
+        let dir = std::env::temp_dir().join(format!("chapterize-resplit-{}", std::process::id()));
+        let analysis = dir.join("analysis");
+        fs::create_dir_all(&analysis).unwrap();
+        let precious = analysis.join("summary.md");
+        fs::write(&precious, b"an agent wrote this and nothing can regenerate it").unwrap();
+        fs::create_dir_all(dir.join("chapters")).unwrap();
+        fs::write(dir.join("chapters").join("stale.md"), b"old").unwrap();
+
+        write_chapters(
+            dir.to_string_lossy().into_owned(),
+            vec![OutputFile { name: "001-new.md".into(), contents: "fresh".into() }],
+        )
+        .unwrap();
+
+        assert_eq!(
+            fs::read_to_string(&precious).unwrap(),
+            "an agent wrote this and nothing can regenerate it"
+        );
+        assert!(!dir.join("chapters").join("stale.md").exists(), "chapters/ is rebuilt");
+        assert!(dir.join("chapters").join("001-new.md").exists());
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn ensure_analysis_is_idempotent_and_never_clobbers() {
+        let dir = std::env::temp_dir().join(format!("chapterize-ensure-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        ensure_analysis(dir.to_string_lossy().into_owned()).unwrap();
+
+        let readme = dir.join("analysis").join("README.md");
+        fs::write(&readme, b"user edited this").unwrap();
+        ensure_analysis(dir.to_string_lossy().into_owned()).unwrap();
+
+        assert_eq!(fs::read_to_string(&readme).unwrap(), "user edited this");
         fs::remove_dir_all(&dir).ok();
     }
 

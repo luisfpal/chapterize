@@ -1,6 +1,6 @@
 import { unzipSync, strFromU8 } from 'fflate';
 import type { AnyNode, Element } from 'domhandler';
-import type { Block, Book, BookMetadata, SpineItem, TocEntry } from './types.js';
+import type { Block, Book, BookMetadata, NoteRef, SpineItem, TocEntry } from './types.js';
 import { attr, children, findAll, findFirst, isElement, parseHtml, parseXml, textOf } from './xml.js';
 
 const CONTAINER = 'META-INF/container.xml';
@@ -108,13 +108,34 @@ export function openEpub(bytes: Uint8Array): Book {
   }
 
   // 4. Flatten the spine into one linear block array.
+  // `linear="no"` means the document sits outside the reading flow. Books put
+  // their footnote bodies there, one file per note; folding them into the flow
+  // drops a chapter-1 footnote into the back matter as orphaned text.
   const raw: Block[] = [];
+  const aside: Block[] = [];
   spine.forEach((item, spineIndex) => {
     const data = files[item.path];
     if (!data) return;
-    collectBlocks(strFromU8(data), item.path, spineIndex, raw);
+    collectBlocks(strFromU8(data), item.path, spineIndex, item.linear ? raw : aside);
   });
   const blocks = joinWrappedLines(raw);
+
+  // Note bodies, addressable by the href their reference carries. Both the
+  // element's own id and its document are registered, because a note file that
+  // holds a single note is often linked without a fragment.
+  const notes = new Map<string, string>();
+  for (const block of joinWrappedLines(aside)) {
+    if (!block.text) continue;
+    // Note bodies usually repeat the marker they are referenced by ("* Interested
+    // readers…"); the Markdown footnote supplies its own, so drop the duplicate.
+    const text = block.text.replace(/^\s*(?:[*\u2020\u2021\u00a7]+|\d{1,3}[.)]?)\s+/, '');
+    if (!text) continue;
+    for (const id of block.ids) {
+      notes.set(`${block.path}#${id}`, text);
+    }
+    const existing = notes.get(block.path);
+    notes.set(block.path, existing ? `${existing} ${text}` : text);
+  }
 
   // Only the figures the text actually references, so an unused cover gallery
   // does not sit in memory for the whole session.
@@ -125,7 +146,7 @@ export function openEpub(bytes: Uint8Array): Book {
     if (data) images.set(path, data);
   }
 
-  return { metadata, spine, blocks, toc, tocSource, images };
+  return { metadata, spine, blocks, toc, tocSource, images, notes };
 }
 
 function readMetadata(opf: ReturnType<typeof parseXml>, pkg: Element | undefined): BookMetadata {
@@ -225,10 +246,15 @@ function inlineHtml(node: AnyNode): string {
     if (!isElement(n)) return;
     const tag = n.name.toLowerCase();
     if (tag === 'script' || tag === 'style') return;
-    const keep = INLINE_KEEP.has(tag);
-    if (keep) out += `<${tag}>`;
+    // A footnote reference keeps its marker text but becomes a tag the renderer
+    // recognises, so "history.*" can become "history.[^1]" on export.
+    const isNoteref =
+      tag === 'a' && /noteref/i.test(`${attr(n, 'type') ?? ''} ${attr(n, 'role') ?? ''}`);
+    const emitted = isNoteref ? 'noteref' : tag;
+    const keep = isNoteref || INLINE_KEEP.has(tag);
+    if (keep) out += `<${emitted}>`;
     for (const child of (n.children ?? []) as AnyNode[]) walk(child);
-    if (keep) out += `</${tag}>`;
+    if (keep) out += `</${emitted}>`;
   };
   for (const child of ('children' in node ? (node.children as AnyNode[]) ?? [] : [])) walk(child);
   return out.replace(/\s+/g, ' ').trim();
@@ -312,6 +338,29 @@ function joinWrappedLines(blocks: Block[]): Block[] {
 }
 
 /**
+ * Footnote references inside one block.
+ *
+ * Publishers mark these either with `epub:type="noteref"` or ARIA's
+ * `role="doc-noteref"`; InDesign-produced books use both at once.
+ */
+function collectNoterefs(el: Element, path: string): NoteRef[] {
+  const out: NoteRef[] = [];
+  for (const anchor of findAll(el, 'a')) {
+    const kind = `${attr(anchor, 'type') ?? ''} ${attr(anchor, 'role') ?? ''}`;
+    if (!/noteref/i.test(kind)) continue;
+    const href = attr(anchor, 'href');
+    if (!href) continue;
+    const { path: target, fragment } = splitHref(href);
+    const resolved = target ? resolvePath(path, target) : path;
+    out.push({
+      label: textOf(anchor) || '*',
+      key: fragment ? `${resolved}#${fragment}` : resolved,
+    });
+  }
+  return out;
+}
+
+/**
  * Emit one Block per leaf block-level element, in document order.
  *
  * An `id` on a wrapper (`<div id="ch7"><p>…`) is carried down to the first leaf
@@ -334,6 +383,7 @@ function collectBlocks(source: string, path: string, spineIndex: number, out: Bl
     const own = attr(el, 'id');
     const ids = own ? [...pendingIds, own] : pendingIds;
     pendingIds = [];
+    const noterefs = collectNoterefs(el, path);
     const figure = findAll(el, 'img')[0] ?? findAll(el, 'image')[0];
     const src = figure ? (attr(figure, 'src') ?? attr(figure, 'href')) : undefined;
     if (!text && !ids.length && !src) return;
@@ -349,6 +399,7 @@ function collectBlocks(source: string, path: string, spineIndex: number, out: Bl
       html: inlineHtml(el),
       ...(src !== undefined ? { image: resolvePath(path, splitHref(src).path) } : {}),
       ...(alt ? { alt } : {}),
+      ...(noterefs.length ? { noterefs } : {}),
     });
   };
 
