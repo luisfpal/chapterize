@@ -1,0 +1,20 @@
+name: ci
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm run typecheck
+      # The parser suite reads the maintainer's real library, which is not in the
+      # repo. It skips itself when absent, so CI proves the build and the types;
+      # the detection guarantees are proven locally against real books.
+      - run: npm test
