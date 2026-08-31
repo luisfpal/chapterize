@@ -3,18 +3,18 @@ import type { Block, Chapter } from '@chapterize/core';
 
 /** Everything the Rust side exposes, in one place, typed. */
 export const native = {
-  listEpubs: (dir: string) => invoke<InboxEntry[]>('list_epubs', { dir }),
+  /** Platform-conventional data and config locations, resolved by Tauri. */
+  appDirs: () => invoke<AppDirs>('app_dirs'),
   readFile: (path: string) => invoke<number[]>('read_file', { path }),
   readText: (path: string) => invoke<string | null>('read_text', { path }),
   writeText: (path: string, contents: string) => invoke<void>('write_text', { path, contents }),
   writeChapters: (dir: string, files: OutputFile[]) => invoke<string>('write_chapters', { dir, files }),
-  moveInto: (source: string, dir: string, name: string) => invoke<string>('move_into', { source, dir, name }),
+  copyInto: (source: string, dir: string, name: string) => invoke<string>('copy_into', { source, dir, name }),
+  removeBook: (dir: string) => invoke<void>('remove_book', { dir }),
   listLibrary: (dir: string) => invoke<string[]>('list_library', { dir }),
-  homeDir: () => invoke<string>('home_dir'),
-  pathExists: (path: string) => invoke<boolean>('path_exists', { path }),
 };
 
-export interface InboxEntry { path: string; name: string; size: number }
+export interface AppDirs { library: string; config: string }
 export interface OutputFile { name: string; contents: string }
 
 /** A highlight, anchored to our own block model rather than to CSS selectors. */

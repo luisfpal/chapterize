@@ -35,25 +35,43 @@ xattr -cr /Applications/Chapterize.app
 
 ## Use
 
-1. Put `.epub` files in your **inbox** folder (set it under *Folders*).
-2. Press **Rescan**, then click a book to split it.
-3. The book becomes a library folder, and the original moves out of the inbox:
+1. **Add books…**, or drop EPUB files onto the window. They can live anywhere —
+   Downloads, an external drive, wherever you keep them.
+2. Chapterize splits each one and **copies** it into your library. The file you
+   picked is never moved or altered.
+3. Open a book, read a chapter, select text to highlight it and attach a note.
+4. **Export** writes the chapter Markdown — with your highlights appended — to any
+   folder. Feed one file to a model, or drop the folder into Gemini Notebook so you
+   can tick a single chapter and keep the others out of the answer.
+
+Keys: `j`/`k` scroll · `n`/`p` chapter · `h` highlight · `m` mark read ·
+`−`/`+` text size · `Esc` library.
+
+### Where your library lives
+
+Chapterize stores books in the location your operating system reserves for
+application data, so it works the same on every platform and needs no setup:
+
+| | |
+|---|---|
+| Linux | `~/.local/share/dev.l11.chapterize/library` |
+| macOS | `~/Library/Application Support/dev.l11.chapterize/library` |
+| Windows | `%LOCALAPPDATA%\dev.l11.chapterize\library` |
+
+Local app data rather than roaming, so a library of EPUBs never follows a Windows
+domain profile across the network. Each book is a plain folder you can open,
+inspect, copy, or back up:
 
 ```
 library/The 48 Laws of Power — Robert Greene/
-    book.epub                                   the original, moved here
+    book.epub                                   a copy of the original
     chapters/003-law-1-never-outshine-the-master.md
     index.json                                  titles, sizes, reading progress
     annotations.json                            highlights and notes
 ```
 
-4. Open the book, read a chapter, select text to highlight it and attach a note.
-5. **Export** writes the chapter Markdown — with your highlights appended — to any
-   folder. Feed one file to a model, or drop the folder into Gemini Notebook so
-   you can tick a single chapter and keep the others out of the answer.
-
-Keys: `j`/`k` scroll · `n`/`p` chapter · `h` highlight · `m` mark read ·
-`−`/`+` text size · `Esc` library.
+Nothing is in a database, so your notes stay readable and greppable, and they
+outlive the app. **Library folder** in the footer opens it in your file manager.
 
 DRM-protected books (Kindle, Kobo, Google Play) cannot be opened by this or any
 other tool — the file is encrypted before it reaches us.

@@ -55,6 +55,22 @@ export function mergeSmall(cuts: CutPoint[], blocks: Block[], minChars: number):
 }
 
 /**
+ * Absorb a trivially small first chapter into the one after it.
+ *
+ * Books routinely open with a cover or half-title that yields a handful of
+ * characters. `mergeSmall` cannot remove it because chapter 0 must stay at block
+ * 0, so it is dissolved forward instead: the boundary moves, the title comes from
+ * the chapter that actually has content, and no blocks are lost.
+ */
+export function absorbTinyFirst(cuts: CutPoint[], blocks: Block[], minChars: number): CutPoint[] {
+  if (cuts.length < 2) return cuts;
+  const chapters = toChapters(cuts, blocks);
+  if ((chapters[0]?.chars ?? 0) >= minChars) return cuts;
+  const second = cuts[1]!;
+  return [{ ...second, at: 0 }, ...cuts.slice(2)];
+}
+
+/**
  * Reduce to at most `max` chapters by repeatedly dissolving the boundary in
  * front of the smallest chapter. Used to fit a destination's source limit.
  */

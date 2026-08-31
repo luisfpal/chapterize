@@ -3,7 +3,7 @@ import { basename } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { openEpub, resolvePath } from '../src/epub.js';
 import { detect, detectFromToc } from '../src/detect.js';
-import { toChapters, limitCount, mergeSmall } from '../src/chapters.js';
+import { toChapters, limitCount, mergeSmall, absorbTinyFirst } from '../src/chapters.js';
 import { deriveTitles } from '../src/titles.js';
 import { allBooks, libraryAvailable, loadBook } from './fixtures.js';
 
@@ -140,5 +140,20 @@ describe.runIf(libraryAvailable())('structural edge cases across the library', (
     const merged = mergeSmall(cuts, book.blocks, 500);
     expect(merged.length).toBeLessThanOrEqual(cuts.length);
     expect(toChapters(merged, book.blocks).at(-1)!.end).toBe(book.blocks.length);
+  });
+});
+
+describe.runIf(libraryAvailable())('leading stub chapters', () => {
+  it('dissolves a near-empty opening chapter into the first real one', () => {
+    const book = openEpub(loadBook('Laws of Power'));
+    const { cuts } = detect(book);
+    const before = toChapters(cuts, book.blocks);
+    expect(before[0]!.chars).toBeLessThan(200);
+
+    const after = toChapters(absorbTinyFirst(cuts, book.blocks, 200), book.blocks);
+    expect(after[0]!.start).toBe(0);
+    expect(after[0]!.chars).toBeGreaterThan(200);
+    expect(after.at(-1)!.end).toBe(book.blocks.length);
+    expect(after.length).toBe(before.length - 1);
   });
 });

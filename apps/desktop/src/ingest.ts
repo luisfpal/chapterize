@@ -1,7 +1,11 @@
 import {
-  openEpub, detect, toChapters, deriveTitles, renderChapter, chapterFilename, EpubError,
+  openEpub, detect, toChapters, deriveTitles, renderChapter, chapterFilename,
+  absorbTinyFirst, EpubError,
 } from '@chapterize/core';
 import { native, bookFolderName, bytesOf, type BookIndex, type OutputFile } from './native';
+
+/** A cover or half-title below this many characters is not a chapter. */
+const STUB_CHARS = 200;
 
 export interface IngestResult {
   dir: string;
@@ -10,16 +14,15 @@ export interface IngestResult {
 }
 
 /**
- * Turn one EPUB into a library folder.
+ * Turn one EPUB, from anywhere on disk, into a library folder.
  *
  *   <library>/<Title — Author>/
- *       book.epub          the original, moved out of the inbox
+ *       book.epub          a copy of the original
  *       chapters/NNN-*.md  one file per chapter
  *       index.json         titles, ranges, progress
  *
- * The original is moved last. If anything above fails the book stays in the
- * inbox, so a half-written library folder can always be retried by re-importing
- * rather than by hunting for where the file went.
+ * The source file is never moved or altered: it is the user's, and it may live
+ * anywhere they chose to keep it.
  */
 export async function ingest(epubPath: string, libraryDir: string): Promise<IngestResult> {
   const bytes = bytesOf(await native.readFile(epubPath));
@@ -32,7 +35,8 @@ export async function ingest(epubPath: string, libraryDir: string): Promise<Inge
   }
 
   const detection = detect(book);
-  const chapters = deriveTitles(toChapters(detection.cuts, book.blocks), book.blocks);
+  const cuts = absorbTinyFirst(detection.cuts, book.blocks, STUB_CHARS);
+  const chapters = deriveTitles(toChapters(cuts, book.blocks), book.blocks);
 
   const warnings: string[] = [];
   if (detection.unresolved.length) {
@@ -84,7 +88,7 @@ export async function ingest(epubPath: string, libraryDir: string): Promise<Inge
   };
   await native.writeText(`${dir}/index.json`, JSON.stringify(index, null, 2));
   await native.writeText(`${dir}/annotations.json`, '[]');
-  await native.moveInto(epubPath, dir, 'book.epub');
+  await native.copyInto(epubPath, dir, 'book.epub');
 
   return { dir, index, warnings };
 }

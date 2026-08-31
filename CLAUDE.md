@@ -28,6 +28,18 @@ points. Detection strategies and manual edits both emit `CutPoint[]`. There are
 no per-layout branches, and there must never be any — if a new EPUB shape seems
 to need one, the block model is wrong and that is the thing to fix.
 
+## Storage rules
+
+- The library lives in the OS application-data directory, resolved by Tauri's path
+  API — never a hardcoded path under the user's documents, and never a cache
+  directory. It holds annotations; losing it loses the user's work.
+- Local app data, not roaming: EPUB libraries must not traverse a Windows domain
+  profile.
+- Import **copies**. The source is a file the user chose from anywhere on their
+  disk; moving it into an application-managed directory is how people lose files.
+- Everything on disk is plain JSON and Markdown. No database, no migration story,
+  and the user's notes survive the app being deleted.
+
 ## Rules learned from real books — do not regress these
 
 - `findAll` must return **document order**. The spine is read from `<itemref>`;

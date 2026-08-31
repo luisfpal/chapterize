@@ -7,13 +7,15 @@
 
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+use tauri::Manager;
 
 #[derive(Serialize)]
-pub struct InboxEntry {
-    path: String,
-    name: String,
-    size: u64,
+pub struct AppDirs {
+    /// Where books live. User data, never cache — losing it loses annotations.
+    library: String,
+    /// Where settings live, kept separate from data per XDG.
+    config: String,
 }
 
 #[derive(Deserialize)]
@@ -22,6 +24,7 @@ pub struct OutputFile {
     contents: String,
 }
 
+/// Expand a leading `~/` so paths stored in JSON stay portable between machines.
 fn expand(path: &str) -> PathBuf {
     if let Some(rest) = path.strip_prefix("~/") {
         if let Some(home) = std::env::var_os("HOME") {
@@ -31,38 +34,32 @@ fn expand(path: &str) -> PathBuf {
     PathBuf::from(path)
 }
 
-/// EPUBs sitting in a directory, newest first. Non-recursive on purpose: an
-/// inbox is a flat drop zone, and recursing would sweep up a whole library.
+/// The platform's conventional locations, resolved by Tauri rather than guessed.
+///
+///   Linux    ~/.local/share/dev.l11.chapterize   ~/.config/dev.l11.chapterize
+///   macOS    ~/Library/Application Support/...   ~/Library/Application Support/...
+///   Windows  %LOCALAPPDATA%                      %APPDATA%
+///
+/// Local app data, not roaming: a library of EPUBs must not follow a Windows
+/// domain profile across the network.
 #[tauri::command]
-fn list_epubs(dir: String) -> Result<Vec<InboxEntry>, String> {
-    let dir = expand(&dir);
-    if !dir.is_dir() {
-        return Ok(Vec::new());
-    }
-    let mut out = Vec::new();
-    for entry in fs::read_dir(&dir).map_err(|e| format!("Cannot read {}: {e}", dir.display()))? {
-        let entry = entry.map_err(|e| e.to_string())?;
-        let path = entry.path();
-        let is_epub = path
-            .extension()
-            .and_then(|e| e.to_str())
-            .is_some_and(|e| e.eq_ignore_ascii_case("epub"));
-        if !is_epub {
-            continue;
-        }
-        let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
-        out.push(InboxEntry {
-            name: path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or_default()
-                .to_string(),
-            path: path.to_string_lossy().into_owned(),
-            size,
-        });
-    }
-    out.sort_by(|a, b| a.name.cmp(&b.name));
-    Ok(out)
+fn app_dirs(app: tauri::AppHandle) -> Result<AppDirs, String> {
+    let resolver = app.path();
+    let data = resolver
+        .app_local_data_dir()
+        .map_err(|e| format!("Cannot resolve the application data directory: {e}"))?;
+    let config = resolver
+        .app_config_dir()
+        .map_err(|e| format!("Cannot resolve the application config directory: {e}"))?;
+    let library = data.join("library");
+    fs::create_dir_all(&library)
+        .map_err(|e| format!("Cannot create {}: {e}", library.display()))?;
+    fs::create_dir_all(&config)
+        .map_err(|e| format!("Cannot create {}: {e}", config.display()))?;
+    Ok(AppDirs {
+        library: library.to_string_lossy().into_owned(),
+        config: config.to_string_lossy().into_owned(),
+    })
 }
 
 #[tauri::command]
@@ -112,25 +109,32 @@ fn write_chapters(dir: String, files: Vec<OutputFile>) -> Result<String, String>
     Ok(base.to_string_lossy().into_owned())
 }
 
-/// Move the original book next to its chapters.
+/// Copy the original book in beside its chapters.
 ///
-/// Falls back to copy-then-delete because a rename across filesystems fails, and
-/// an inbox on a different mount from the library is an ordinary setup.
+/// Copy, never move: the source is a file the user chose from anywhere on their
+/// disk, and relocating it into an application-managed directory would make it
+/// disappear from where they left it.
 #[tauri::command]
-fn move_into(source: String, dir: String, name: String) -> Result<String, String> {
+fn copy_into(source: String, dir: String, name: String) -> Result<String, String> {
     let source = expand(&source);
     let target_dir = expand(&dir);
     fs::create_dir_all(&target_dir)
         .map_err(|e| format!("Cannot create {}: {e}", target_dir.display()))?;
     let target = target_dir.join(&name);
-
-    if fs::rename(&source, &target).is_err() {
-        fs::copy(&source, &target)
-            .map_err(|e| format!("Cannot copy to {}: {e}", target.display()))?;
-        fs::remove_file(&source)
-            .map_err(|e| format!("Copied to {} but could not remove the original: {e}", target.display()))?;
-    }
+    fs::copy(&source, &target)
+        .map_err(|e| format!("Cannot copy to {}: {e}", target.display()))?;
     Ok(target.to_string_lossy().into_owned())
+}
+
+/// Delete one book folder. Refuses anything that is not a book, so a mistyped
+/// path cannot take a directory tree with it.
+#[tauri::command]
+fn remove_book(dir: String) -> Result<(), String> {
+    let dir = expand(&dir);
+    if !dir.join("index.json").exists() {
+        return Err(format!("{} is not a Chapterize book; refusing to delete it.", dir.display()));
+    }
+    fs::remove_dir_all(&dir).map_err(|e| format!("Cannot delete {}: {e}", dir.display()))
 }
 
 /// Sub-directories of the library that hold a parsed book.
@@ -151,16 +155,6 @@ fn list_library(dir: String) -> Result<Vec<String>, String> {
     Ok(out)
 }
 
-#[tauri::command]
-fn home_dir() -> String {
-    std::env::var("HOME").unwrap_or_else(|_| String::from("/"))
-}
-
-#[tauri::command]
-fn path_exists(path: String) -> bool {
-    Path::new(&expand(&path)).exists()
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -168,15 +162,14 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .invoke_handler(tauri::generate_handler![
-            list_epubs,
+            app_dirs,
             read_file,
             read_text,
             write_text,
             write_chapters,
-            move_into,
+            copy_into,
+            remove_book,
             list_library,
-            home_dir,
-            path_exists,
         ])
         .run(tauri::generate_context!())
         .expect("error while running chapterize");
