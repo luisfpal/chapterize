@@ -7,7 +7,12 @@ import { join } from 'node:path';
  * EPUB 2 NCX and EPUB 3 nav, and a book with more chapters than most tools
  * expect. They are the user's own library and are never committed.
  */
-const ROOT = join(process.env['HOME'] ?? '', '$CHAPTERIZE_FIXTURES');
+const HOME = process.env['HOME'] ?? '';
+/** The user's shelf, plus whatever the app itself has already imported. */
+const ROOTS = [
+  join(HOME, '$CHAPTERIZE_FIXTURES'),
+  join(HOME, '.local/share/dev.l11.chapterize/library'),
+];
 /** Scratch copies made during calibration would otherwise be counted twice. */
 const EXCLUDE = /_chapterize_experiment/;
 
@@ -23,18 +28,30 @@ function walk(dir: string, out: string[] = []): string[] {
 }
 
 export function allBooks(): string[] {
-  return walk(ROOT);
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const root of ROOTS) {
+    for (const path of walk(root)) {
+      // The library holds a copy of each imported book; count each title once.
+      const key = path.split('/').pop() ?? path;
+      if (key === 'book.epub') { out.push(path); continue; }
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(path);
+    }
+  }
+  return out;
 }
 
 export function libraryAvailable(): boolean {
   return allBooks().length > 0;
 }
 
-/** Find a book by a distinctive substring of its filename. */
+/** Find a book by a distinctive substring of its path. */
 export function bookPath(needle: string): string {
   const want = needle.toLowerCase();
   const match = allBooks().find((p) => p.toLowerCase().includes(want));
-  if (!match) throw new Error(`No fixture matching "${needle}" under ${ROOT}`);
+  if (!match) throw new Error(`No fixture matching "${needle}" under ${ROOTS.join(', ')}`);
   return match;
 }
 

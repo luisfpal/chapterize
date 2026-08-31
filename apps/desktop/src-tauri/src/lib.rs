@@ -110,6 +110,16 @@ fn write_chapters(dir: String, files: Vec<OutputFile>) -> Result<String, String>
     Ok(base.to_string_lossy().into_owned())
 }
 
+/// Write binary content — the figures pulled out of a book.
+#[tauri::command]
+fn write_bytes(path: String, contents: Vec<u8>) -> Result<(), String> {
+    let path = expand(&path);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("Cannot create {}: {e}", parent.display()))?;
+    }
+    fs::write(&path, contents).map_err(|e| format!("Cannot write {}: {e}", path.display()))
+}
+
 /// Copy the original book in beside its chapters.
 ///
 /// Copy, never move: the source is a file the user chose from anywhere on their
@@ -122,6 +132,19 @@ fn copy_into(source: String, dir: String, name: String) -> Result<String, String
     fs::create_dir_all(&target_dir)
         .map_err(|e| format!("Cannot create {}: {e}", target_dir.display()))?;
     let target = target_dir.join(&name);
+
+    // Copying a file onto itself truncates it to nothing, because the
+    // destination is opened for truncation before the source is read. Re-splitting
+    // a book in the library asks for exactly that, so refuse it here rather than
+    // relying on every caller to remember.
+    let same = match (source.canonicalize(), target.canonicalize()) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    };
+    if same {
+        return Ok(target.to_string_lossy().into_owned());
+    }
+
     fs::copy(&source, &target)
         .map_err(|e| format!("Cannot copy to {}: {e}", target.display()))?;
     Ok(target.to_string_lossy().into_owned())
@@ -207,6 +230,7 @@ pub fn run() {
             read_file,
             read_text,
             write_text,
+            write_bytes,
             write_chapters,
             copy_into,
             remove_book,
@@ -215,4 +239,63 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running chapterize");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Copying a file onto itself used to truncate it to zero bytes, which
+    /// destroyed the library's copy of a book whenever it was re-split.
+    #[test]
+    fn copy_into_refuses_to_copy_a_file_onto_itself() {
+        let dir = std::env::temp_dir().join(format!("chapterize-selfcopy-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let book = dir.join("book.epub");
+        fs::write(&book, b"PK\x03\x04 pretend archive").unwrap();
+
+        let result = copy_into(
+            book.to_string_lossy().into_owned(),
+            dir.to_string_lossy().into_owned(),
+            "book.epub".to_string(),
+        );
+
+        assert!(result.is_ok(), "same-file copy should be a no-op, not an error");
+        assert_eq!(
+            fs::read(&book).unwrap(),
+            b"PK\x03\x04 pretend archive",
+            "the file must still hold its original bytes"
+        );
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn copy_into_still_copies_between_distinct_paths() {
+        let dir = std::env::temp_dir().join(format!("chapterize-copy-{}", std::process::id()));
+        let target = dir.join("library");
+        fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("source.epub");
+        fs::write(&source, b"contents").unwrap();
+
+        copy_into(
+            source.to_string_lossy().into_owned(),
+            target.to_string_lossy().into_owned(),
+            "book.epub".to_string(),
+        )
+        .unwrap();
+
+        assert_eq!(fs::read(target.join("book.epub")).unwrap(), b"contents");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn only_epub_arguments_are_treated_as_books() {
+        let args = vec![
+            "/usr/bin/chapterize".to_string(),
+            "--flag".to_string(),
+            "/books/one.EPUB".to_string(),
+            "/tmp/notes.txt".to_string(),
+        ];
+        assert_eq!(epubs_from_args(args), vec!["/books/one.EPUB".to_string()]);
+    }
 }

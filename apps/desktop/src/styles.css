@@ -291,3 +291,34 @@ kbd {
   font-size: 15px; color: var(--accent); font-weight: 600;
   pointer-events: none;
 }
+
+/* ── pane resizing ─────────────────────────────────────────────────── */
+.resizer {
+  flex: 0 0 5px; cursor: col-resize; background: var(--border);
+  position: relative; transition: background 120ms;
+}
+.resizer::after {
+  content: ''; position: absolute; inset: 0 -3px; /* forgiving hit area */
+}
+.resizer:hover, .resizer:active { background: var(--accent); }
+
+/* ── figures ───────────────────────────────────────────────────────── */
+.reader-col .figure { margin: 1.6em 0; text-align: center; }
+.reader-col .figure img {
+  max-width: 100%; height: auto; border-radius: var(--r-md);
+  background: #fff; /* diagrams are usually transparent PNGs drawn in black */
+}
+.reader-col figcaption {
+  font-family: var(--ui-font); font-size: 0.78em;
+  color: var(--text-dim); margin-top: 0.6em; line-height: 1.45;
+}
+.figure-missing {
+  display: inline-block; padding: 20px 26px; border-radius: var(--r-md);
+  border: 1px dashed var(--border-strong); color: var(--text-faint);
+  font-family: var(--ui-font); font-size: 0.8em;
+}
+.reader-col code {
+  font-family: var(--mono-font); font-size: 0.88em;
+  background: var(--bg-panel); padding: 0.1em 0.3em; border-radius: 3px;
+}
+.reader-col sup, .reader-col sub { font-size: 0.72em; line-height: 0; }

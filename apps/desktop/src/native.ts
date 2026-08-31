@@ -8,6 +8,7 @@ export const native = {
   readFile: (path: string) => invoke<number[]>('read_file', { path }),
   readText: (path: string) => invoke<string | null>('read_text', { path }),
   writeText: (path: string, contents: string) => invoke<void>('write_text', { path, contents }),
+  writeBytes: (path: string, contents: number[]) => invoke<void>('write_bytes', { path, contents }),
   writeChapters: (dir: string, files: OutputFile[]) => invoke<string>('write_chapters', { dir, files }),
   copyInto: (source: string, dir: string, name: string) => invoke<string>('copy_into', { source, dir, name }),
   removeBook: (dir: string) => invoke<void>('remove_book', { dir }),
@@ -61,6 +62,8 @@ export interface LoadedBook {
   index: BookIndex;
   blocks: Block[];
   annotations: Annotation[];
+  /** Figure path inside the EPUB -> object URL the reader can display. */
+  imageUrls: Map<string, string>;
 }
 
 export function toStored(chapters: Chapter[], titles: string[], files: string[]): StoredChapter[] {

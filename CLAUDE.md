@@ -28,6 +28,27 @@ points. Detection strategies and manual edits both emit `CutPoint[]`. There are
 no per-layout branches, and there must never be any — if a new EPUB shape seems
 to need one, the block model is wrong and that is the thing to fix.
 
+## Parsing rules learned from broken books
+
+- Converted scans emit **one `<p>` per printed line**. Faithful markup, unreadable
+  prose. Rejoining needs positive evidence of continuation — next line starting
+  lowercase, or this one ending on a comma or a function word — because "ends
+  without a full stop" also describes every display title, and swallowing one
+  destroys the chapter's name.
+- Never join across a heading, a figure, a list item, a document boundary, or out
+  of an all-caps line.
+- `Block.html` holds whitelisted inline tags with **no attributes**. Its text
+  nodes must concatenate to `Block.text` exactly, because annotation offsets index
+  into that text. There is a test for it.
+- Highlights are laid over markup by resolving every character to its tag stack
+  and grouping equal neighbours. Injecting `<mark>` into the HTML directly
+  produces crossed tags.
+- Only append a derived name to a chapter title when the TOC label is a bare
+  enumerator ("LAW 1", "IV"). Labels that already read as titles are left alone.
+- Stub chapters merge **forward** when something follows (a part divider heads the
+  chapter after it) and backward only at the end.
+- Markdown emphasis must not sit against a space: `**bold. **` renders literally.
+
 ## Storage rules
 
 - The library lives in the OS application-data directory, resolved by Tauri's path
@@ -39,6 +60,11 @@ to need one, the block model is wrong and that is the thing to fix.
   disk; moving it into an application-managed directory is how people lose files.
 - Everything on disk is plain JSON and Markdown. No database, no migration story,
   and the user's notes survive the app being deleted.
+- **Never copy a file onto itself.** `fs::copy` truncates the destination before
+  reading the source, so same-path copy destroys the file. Re-splitting asks for
+  exactly that; `copy_into` refuses it and a Rust test pins the behaviour.
+- Re-splitting moves block indices, so annotations are re-anchored by searching
+  for their stored quote rather than kept at stale offsets.
 
 ## Rules learned from real books — do not regress these
 

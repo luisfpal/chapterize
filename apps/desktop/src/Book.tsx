@@ -18,30 +18,99 @@ function offsetWithin(root: Element, node: Node, offset: number): number {
   return total;
 }
 
-/** Split one block's text around its highlights so each can be marked. */
-function segments(text: string, marks: Annotation[]) {
-  if (!marks.length) return [{ text, mark: null as Annotation | null }];
-  const ordered = [...marks].sort((a, b) => a.start - b.start);
-  const out: { text: string; mark: Annotation | null }[] = [];
-  let at = 0;
-  for (const m of ordered) {
-    const start = Math.max(at, Math.min(m.start, text.length));
-    const end = Math.max(start, Math.min(m.end, text.length));
-    if (start > at) out.push({ text: text.slice(at, start), mark: null });
-    if (end > start) out.push({ text: text.slice(start, end), mark: m });
-    at = end;
+/** One inline tag stack plus highlight, covering a run of characters. */
+interface Run {
+  text: string;
+  tags: string[];
+  mark: Annotation | null;
+}
+
+const TAG_RE = /<(\/?)([a-z]+)>/g;
+
+function decodeEntities(s: string): string {
+  return s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+}
+
+/**
+ * Lay the block's highlights over its inline markup.
+ *
+ * Highlight ranges are offsets into plain text, while emphasis lives in the
+ * HTML, so inserting <mark> into the markup directly would produce crossed tags
+ * (`<em>a<mark>b</em>c</mark>`). Instead every character is resolved to its tag
+ * stack and its highlight, then equal neighbours are grouped — which cannot
+ * produce invalid nesting because each run is emitted whole.
+ */
+function runs(html: string, text: string, marks: Annotation[]): Run[] {
+  const chars: { ch: string; tags: string[] }[] = [];
+  const stack: string[] = [];
+  let last = 0;
+  let match: RegExpExecArray | null;
+  TAG_RE.lastIndex = 0;
+
+  const pushText = (raw: string): void => {
+    for (const ch of decodeEntities(raw)) chars.push({ ch, tags: [...stack] });
+  };
+
+  while ((match = TAG_RE.exec(html)) !== null) {
+    pushText(html.slice(last, match.index));
+    if (match[1]) stack.pop();
+    else stack.push(match[2]!);
+    last = match.index + match[0].length;
   }
-  if (at < text.length) out.push({ text: text.slice(at), mark: null });
+  pushText(html.slice(last));
+
+  // Fall back to plain text if the markup and the text ever disagree; offsets
+  // must index into exactly what the annotation was recorded against.
+  const source = chars.length === text.length
+    ? chars
+    : [...text].map((ch) => ({ ch, tags: [] as string[] }));
+
+  const markAt = (i: number): Annotation | null =>
+    marks.find((m) => i >= m.start && i < m.end) ?? null;
+
+  const out: Run[] = [];
+  source.forEach((c, i) => {
+    const mark = markAt(i);
+    const prev = out[out.length - 1];
+    const key = c.tags.join(',');
+    if (prev && prev.tags.join(',') === key && prev.mark === mark) prev.text += c.ch;
+    else out.push({ text: c.ch, tags: c.tags, mark });
+  });
   return out;
 }
 
-function BlockView({ block, index, marks }: { block: Block; index: number; marks: Annotation[] }) {
-  const parts = segments(block.text, marks);
-  const content = parts.map((p, i) =>
-    p.mark
-      ? <mark key={i} className={`c${p.mark.color}`} title={p.mark.note || undefined}>{p.text}</mark>
-      : <span key={i}>{p.text}</span>,
-  );
+function renderRun(run: Run, key: number) {
+  let node: React.ReactNode = run.text;
+  for (const tag of [...run.tags].reverse()) {
+    if (tag === 'strong' || tag === 'b') node = <strong>{node}</strong>;
+    else if (tag === 'em' || tag === 'i') node = <em>{node}</em>;
+    else if (tag === 'sup') node = <sup>{node}</sup>;
+    else if (tag === 'sub') node = <sub>{node}</sub>;
+    else if (tag === 'code') node = <code>{node}</code>;
+    else if (tag === 'u') node = <u>{node}</u>;
+    else node = <span>{node}</span>;
+  }
+  return run.mark
+    ? <mark key={key} className={`c${run.mark.color}`} title={run.mark.note || undefined}>{node}</mark>
+    : <span key={key}>{node}</span>;
+}
+
+function BlockView({
+  block, index, marks, imageUrls,
+}: { block: Block; index: number; marks: Annotation[]; imageUrls: Map<string, string> }) {
+  if (block.image) {
+    const src = imageUrls.get(block.image);
+    return (
+      <figure data-block={index} className="figure">
+        {src
+          ? <img src={src} alt={block.alt ?? ''} loading="lazy" />
+          : <span className="figure-missing">Figure not found in this book</span>}
+        {block.alt && <figcaption>{block.alt}</figcaption>}
+      </figure>
+    );
+  }
+
+  const content = runs(block.html || block.text, block.text, marks).map(renderRun);
   const props = { 'data-block': index };
   if (block.heading === 1) return <h1 {...props}>{content}</h1>;
   if (block.heading === 2) return <h2 {...props}>{content}</h2>;
@@ -49,6 +118,52 @@ function BlockView({ block, index, marks }: { block: Block; index: number; marks
   if (block.tag === 'blockquote') return <blockquote {...props}>{content}</blockquote>;
   if (block.tag === 'li') return <li {...props}>{content}</li>;
   return <p {...props}>{content}</p>;
+}
+
+const WIDTH_KEY = 'chapterize.panes.v1';
+const LIMITS = { left: [190, 560], right: [180, 560] } as const;
+
+function loadWidths(): { left: number; right: number } {
+  try {
+    const stored = localStorage.getItem(WIDTH_KEY);
+    if (stored) return JSON.parse(stored) as { left: number; right: number };
+  } catch { /* fall through to defaults */ }
+  return { left: 288, right: 268 };
+}
+
+/**
+ * Drag handle between panes. Width is committed on every move so the layout
+ * tracks the cursor, and persisted so it survives closing the book.
+ */
+function Resizer({ side, width, onChange }: {
+  side: 'left' | 'right';
+  width: number;
+  onChange: (next: number) => void;
+}) {
+  const start = useCallback((event: React.MouseEvent) => {
+    event.preventDefault();
+    const originX = event.clientX;
+    const originWidth = width;
+    const [min, max] = LIMITS[side];
+
+    const move = (e: MouseEvent): void => {
+      const delta = side === 'left' ? e.clientX - originX : originX - e.clientX;
+      onChange(Math.max(min, Math.min(max, originWidth + delta)));
+    };
+    const stop = (): void => {
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', stop);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+    // Suppress selection while dragging, or the reader text highlights instead.
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', stop);
+  }, [onChange, side, width]);
+
+  return <div className="resizer" onMouseDown={start} role="separator" aria-orientation="vertical" />;
 }
 
 interface Props {
@@ -64,7 +179,16 @@ export function BookView({ book, onBack, onExport }: Props) {
   const [pending, setPending] = useState<Omit<Annotation, 'note'> | null>(null);
   const [draft, setDraft] = useState('');
   const [size, setSize] = useState(18);
+  const [widths, setWidths] = useState(loadWidths);
   const readerRef = useRef<HTMLDivElement>(null);
+
+  const setPane = useCallback((side: 'left' | 'right', next: number) => {
+    setWidths((current) => {
+      const updated = { ...current, [side]: next };
+      localStorage.setItem(WIDTH_KEY, JSON.stringify(updated));
+      return updated;
+    });
+  }, []);
 
   const chapter = index.chapters[current];
 
@@ -171,7 +295,7 @@ export function BookView({ book, onBack, onExport }: Props) {
       </div>
 
       <div className="panes">
-        <div className="pane left">
+        <div className="pane left" style={{ flexBasis: widths.left }}>
           <div className="pane-head">
             Chapters
             <span className="spacer" />
@@ -196,13 +320,15 @@ export function BookView({ book, onBack, onExport }: Props) {
           </div>
         </div>
 
+        <Resizer side="left" width={widths.left} onChange={(n) => setPane('left', n)} />
+
         <div className="pane center">
           <div className="pane-body" ref={readerRef} onMouseUp={capture}>
             <div className="reader" style={{ ['--reader-size' as string]: `${size}px` }}>
               <div className="reader-title">
                 <h2>{chapter.title}</h2>
                 <div className="prov">
-                  Chapter {chapter.index} of {index.chapters.length - 1} ·
+                  {chapter.index + 1} of {index.chapters.length} in reading order ·
                   {' '}≈{estimateTokens(chapter.chars).toLocaleString()} tokens (estimated)
                 </div>
               </div>
@@ -213,6 +339,7 @@ export function BookView({ book, onBack, onExport }: Props) {
                     block={b}
                     index={chapter.start + i}
                     marks={byBlock.get(chapter.start + i) ?? []}
+                    imageUrls={book.imageUrls}
                   />
                 ))}
               </div>
@@ -220,7 +347,9 @@ export function BookView({ book, onBack, onExport }: Props) {
           </div>
         </div>
 
-        <div className="pane right">
+        <Resizer side="right" width={widths.right} onChange={(n) => setPane('right', n)} />
+
+        <div className="pane right" style={{ flexBasis: widths.right }}>
           <div className="pane-head">
             Notes<span className="spacer" />{chapterAnnotations.length}
           </div>

@@ -55,19 +55,40 @@ export function mergeSmall(cuts: CutPoint[], blocks: Block[], minChars: number):
 }
 
 /**
- * Absorb a trivially small first chapter into the one after it.
+ * Dissolve stub chapters — entries with almost no text of their own.
  *
- * Books routinely open with a cover or half-title that yields a handful of
- * characters. `mergeSmall` cannot remove it because chapter 0 must stay at block
- * 0, so it is dissolved forward instead: the boundary moves, the title comes from
- * the chapter that actually has content, and no blocks are lost.
+ * Two kinds exist and they merge in opposite directions:
+ *
+ *   A part divider ("THE FUNDAMENTALS", 14 tokens) is a heading for what comes
+ *   next, so it merges FORWARD and hands its slot to the chapter it introduces.
+ *
+ *   A trailing blank or colophon has nothing after it, so it merges BACKWARD.
+ *
+ * Getting the direction wrong is what produces a reader that opens on a page
+ * containing nothing but a section title.
  */
-export function absorbTinyFirst(cuts: CutPoint[], blocks: Block[], minChars: number): CutPoint[] {
-  if (cuts.length < 2) return cuts;
-  const chapters = toChapters(cuts, blocks);
-  if ((chapters[0]?.chars ?? 0) >= minChars) return cuts;
-  const second = cuts[1]!;
-  return [{ ...second, at: 0 }, ...cuts.slice(2)];
+export function mergeStubs(cuts: CutPoint[], blocks: Block[], minChars: number): CutPoint[] {
+  let current = cuts;
+  // Each pass removes at most one boundary, so the loop is bounded by the count.
+  for (let guard = 0; guard < cuts.length; guard++) {
+    const chapters = toChapters(current, blocks);
+    const victim = chapters.findIndex((c) => c.chars < minChars);
+    if (victim === -1 || chapters.length < 2) break;
+
+    if (victim < current.length - 1) {
+      // Forward: keep this start, adopt the following chapter's title.
+      const next = current[victim + 1]!;
+      current = [
+        ...current.slice(0, victim),
+        { ...next, at: current[victim]!.at },
+        ...current.slice(victim + 2),
+      ];
+    } else {
+      // Backward: the last chapter has nothing to merge into but its predecessor.
+      current = current.slice(0, victim);
+    }
+  }
+  return current;
 }
 
 /**

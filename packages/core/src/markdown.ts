@@ -22,13 +22,48 @@ export function chapterFilename(chapter: Chapter, title: string): string {
   return `${String(chapter.index).padStart(3, '0')}-${slugify(title)}.md`;
 }
 
+/** Basename of a path inside the EPUB, used as the exported image filename. */
+export function imageFilename(path: string): string {
+  return path.split('/').pop() ?? path;
+}
+
 function renderBlock(block: Block): string {
+  if (block.image) {
+    return `![${(block.alt ?? '').replace(/[[\]]/g, '')}](images/${imageFilename(block.image)})`;
+  }
   if (!block.text) return '';
   if (block.heading > 0) return `${'#'.repeat(Math.min(block.heading, 6))} ${block.text}`;
   if (block.tag === 'li') return `- ${block.text}`;
   if (block.tag === 'blockquote') return `> ${block.text}`;
   if (block.tag === 'pre') return '```\n' + block.text + '\n```';
-  return block.text;
+  // Inline emphasis is carried through so exported prose keeps the author's
+  // stress; the tag set is a fixed whitelist, so this cannot emit anything else.
+  return block.html ? inlineMarkdown(block.html) : block.text;
+}
+
+/**
+ * Convert whitelisted inline HTML to Markdown emphasis.
+ *
+ * Whitespace is moved outside the markers first. Books commonly write
+ * `<b>Productivity compounds. </b>`, and `**Productivity compounds. **` is not
+ * bold in any Markdown parser — the closing marker must sit against a
+ * non-space character.
+ */
+export function inlineMarkdown(html: string): string {
+  const shifted = html.replace(
+    /<(b|strong|i|em)>(\s*)([\s\S]*?)(\s*)<\/\1>/g,
+    (_all, tag: string, lead: string, inner: string, trail: string) =>
+      inner ? `${lead}<${tag}>${inner}</${tag}>${trail}` : `${lead}${trail}`,
+  );
+  return shifted
+    .replace(/<\/?(em|i)>/g, '*')
+    .replace(/<\/?(strong|b)>/g, '**')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    // Shifting whitespace out of a marker can leave it beside a space that was
+    // already there; block text is whitespace-collapsed, so collapse again.
+    .replace(/ {2,}/g, ' ')
+    .trim();
 }
 
 export interface RenderOptions {

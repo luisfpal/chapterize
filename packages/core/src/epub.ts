@@ -1,7 +1,7 @@
 import { unzipSync, strFromU8 } from 'fflate';
-import type { Element } from 'domhandler';
+import type { AnyNode, Element } from 'domhandler';
 import type { Block, Book, BookMetadata, SpineItem, TocEntry } from './types.js';
-import { attr, children, collapse, findAll, findFirst, parseHtml, parseXml, textOf } from './xml.js';
+import { attr, children, findAll, findFirst, isElement, parseHtml, parseXml, textOf } from './xml.js';
 
 const CONTAINER = 'META-INF/container.xml';
 
@@ -108,14 +108,24 @@ export function openEpub(bytes: Uint8Array): Book {
   }
 
   // 4. Flatten the spine into one linear block array.
-  const blocks: Block[] = [];
+  const raw: Block[] = [];
   spine.forEach((item, spineIndex) => {
-    const raw = files[item.path];
-    if (!raw) return;
-    collectBlocks(strFromU8(raw), item.path, spineIndex, blocks);
+    const data = files[item.path];
+    if (!data) return;
+    collectBlocks(strFromU8(data), item.path, spineIndex, raw);
   });
+  const blocks = joinWrappedLines(raw);
 
-  return { metadata, spine, blocks, toc, tocSource };
+  // Only the figures the text actually references, so an unused cover gallery
+  // does not sit in memory for the whole session.
+  const wanted = new Set(blocks.map((b) => b.image).filter((p): p is string => p !== undefined));
+  const images = new Map<string, Uint8Array>();
+  for (const path of wanted) {
+    const data = files[path];
+    if (data) images.set(path, data);
+  }
+
+  return { metadata, spine, blocks, toc, tocSource, images };
 }
 
 function readMetadata(opf: ReturnType<typeof parseXml>, pkg: Element | undefined): BookMetadata {
@@ -190,6 +200,118 @@ function readNcx(source: string, ncxPath: string): TocEntry[] {
 }
 
 /**
+ * Inline elements worth keeping. Everything else is unwrapped to its text, and
+ * NO attributes survive — the rendered HTML carries no href, src or handler, so
+ * book content cannot reach anything outside the paragraph it lives in.
+ */
+const INLINE_KEEP = new Set(['em', 'i', 'strong', 'b', 'sup', 'sub', 'code', 'cite', 'q', 'small', 'u']);
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+/**
+ * Serialise inline markup, stripping tags outside the whitelist but keeping their
+ * text. The concatenated text nodes equal `textOf(el)`, which annotation offsets
+ * depend on.
+ */
+function inlineHtml(node: AnyNode): string {
+  let out = '';
+  const walk = (n: AnyNode): void => {
+    if (n.type === 'text') {
+      out += escapeHtml((n as unknown as { data: string }).data);
+      return;
+    }
+    if (!isElement(n)) return;
+    const tag = n.name.toLowerCase();
+    if (tag === 'script' || tag === 'style') return;
+    const keep = INLINE_KEEP.has(tag);
+    if (keep) out += `<${tag}>`;
+    for (const child of (n.children ?? []) as AnyNode[]) walk(child);
+    if (keep) out += `</${tag}>`;
+  };
+  for (const child of ('children' in node ? (node.children as AnyNode[]) ?? [] : [])) walk(child);
+  return out.replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Sentence-final punctuation. A semicolon is deliberately absent: a line ending
+ * in one is mid-sentence, and treating it as final cut the sidebar below in half.
+ */
+const TERMINAL = /[.!?:\u2026\u201d\u2019"')\]]\s*$/;
+
+/** Trailing dangling punctuation that can only be mid-sentence. */
+const DANGLING = /[,;\u2013\u2014-]\s*$/;
+
+/**
+ * Words a sentence does not end on. A line finishing here was wrapped by the
+ * converter, not by the author.
+ */
+const FUNCTION_WORDS = new Set([
+  'the', 'a', 'an', 'and', 'or', 'but', 'of', 'in', 'to', 'for', 'with', 'at',
+  'by', 'from', 'as', 'is', 'was', 'were', 'are', 'be', 'been', 'that', 'which',
+  'who', 'his', 'her', 'its', 'their', 'this', 'these', 'those', 'on', 'into',
+  'than', 'then', 'when', 'while', 'if', 'not', 'no', 'so', 'he', 'she', 'they',
+  'it', 'you', 'we', 'i', 'him', 'them', 'us', 'my', 'your', 'our',
+]);
+
+function lastWord(text: string): string {
+  const words = text.trim().split(/\s+/);
+  return (words[words.length - 1] ?? '').toLowerCase().replace(/[^a-z']/g, '');
+}
+
+/** All-caps lines are display titles, never wrapped body text. */
+function isDisplayLine(text: string): boolean {
+  const letters = text.replace(/[^A-Za-z]/g, '');
+  if (letters.length < 2) return false;
+  return letters === letters.toUpperCase();
+}
+
+/**
+ * Rejoin paragraphs that are really one paragraph split across printed lines.
+ *
+ * Books converted from scans emit one `<p>` per line of the original page —
+ * `<p>The Stars in the</p><p>Sky. There can be only</p>` — which is faithful
+ * markup and unreadable prose.
+ *
+ * Ending without sentence punctuation is necessary but not sufficient: display
+ * titles such as `NEVER OUTSHINE THE MASTER` end that way too, and swallowing
+ * one into the body below it destroys the chapter's title. So a join also needs
+ * positive evidence of continuation — the next line starting lowercase, or this
+ * line ending on a comma or a word no sentence ends on.
+ */
+function joinWrappedLines(blocks: Block[]): Block[] {
+  const out: Block[] = [];
+  for (const block of blocks) {
+    const prev = out[out.length - 1];
+    const structurallyJoinable =
+      prev !== undefined &&
+      prev.heading === 0 && block.heading === 0 &&
+      prev.image === undefined && block.image === undefined &&
+      prev.tag === 'p' && block.tag === 'p' &&
+      prev.path === block.path &&
+      prev.text.length > 0 && block.text.length > 0 &&
+      !isDisplayLine(prev.text) &&
+      !TERMINAL.test(prev.text);
+
+    const continues =
+      structurallyJoinable &&
+      (/^[a-z]/.test(block.text) ||
+        DANGLING.test(prev!.text) ||
+        FUNCTION_WORDS.has(lastWord(prev!.text)));
+
+    if (continues) {
+      prev!.text = `${prev!.text} ${block.text}`;
+      prev!.html = `${prev!.html} ${block.html}`;
+      prev!.ids.push(...block.ids);
+    } else {
+      out.push(block);
+    }
+  }
+  return out;
+}
+
+/**
  * Emit one Block per leaf block-level element, in document order.
  *
  * An `id` on a wrapper (`<div id="ch7"><p>…`) is carried down to the first leaf
@@ -212,8 +334,11 @@ function collectBlocks(source: string, path: string, spineIndex: number, out: Bl
     const own = attr(el, 'id');
     const ids = own ? [...pendingIds, own] : pendingIds;
     pendingIds = [];
-    if (!text && !ids.length) return;
+    const figure = findAll(el, 'img')[0] ?? findAll(el, 'image')[0];
+    const src = figure ? (attr(figure, 'src') ?? attr(figure, 'href')) : undefined;
+    if (!text && !ids.length && !src) return;
     const headingMatch = /^h([1-6])$/.exec(tag);
+    const alt = figure ? attr(figure, 'alt') : undefined;
     out.push({
       spineIndex,
       path,
@@ -221,6 +346,9 @@ function collectBlocks(source: string, path: string, spineIndex: number, out: Bl
       tag,
       heading: headingMatch ? Number(headingMatch[1]) : 0,
       text,
+      html: inlineHtml(el),
+      ...(src !== undefined ? { image: resolvePath(path, splitHref(src).path) } : {}),
+      ...(alt ? { alt } : {}),
     });
   };
 
@@ -236,7 +364,10 @@ function collectBlocks(source: string, path: string, spineIndex: number, out: Bl
       const tag = el.name.toLowerCase();
       if (tag === 'script' || tag === 'style' || tag === 'head') continue;
 
-      if (BLOCK_TAGS.has(tag) && !hasBlockChild(el)) {
+      if (tag === 'img' || tag === 'image') {
+        // Figures carry no text, so they would otherwise vanish entirely.
+        emit(el, 'figure');
+      } else if (BLOCK_TAGS.has(tag) && !hasBlockChild(el)) {
         emit(el, tag);
       } else {
         // Not a leaf block: keep its id so it lands on the next real block.

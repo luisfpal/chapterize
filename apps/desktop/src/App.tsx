@@ -5,7 +5,7 @@ import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { listen } from '@tauri-apps/api/event';
 import { estimateTokens } from '@chapterize/core';
 import { native, type AppDirs, type BookIndex, type LoadedBook } from './native';
-import { ingest, load } from './ingest';
+import { ingest, load, resplit } from './ingest';
 import { BookView } from './Book';
 
 interface Shelf { dir: string; index: BookIndex }
@@ -123,6 +123,24 @@ export function App() {
     finally { setBusy(''); }
   }, []);
 
+  /** Re-run the splitter over a book already in the library. */
+  const redoSplit = useCallback(async (dir: string) => {
+    if (!dirs) return;
+    setError(''); setNotice(''); setBusy('Re-splitting…');
+    try {
+      const result = await resplit(dir, dirs.library);
+      await refresh(dirs.library);
+      setNotice(
+        `${result.index.title}: ${result.index.chapters.length} chapters.` +
+        (result.orphaned ? ` ${result.orphaned} highlight(s) no longer match any text and were dropped.` : ''),
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy('');
+    }
+  }, [dirs, refresh]);
+
   const deleteBook = useCallback(async (dir: string) => {
     if (!dirs) return;
     setConfirming(null);
@@ -223,6 +241,9 @@ export function App() {
                     <div className="card-tools">
                       <button className="btn ghost tiny" title="Show in file manager"
                               onClick={() => void revealItemInDir(`${dir}/index.json`)}>Reveal</button>
+                      <button className="btn ghost tiny" disabled={busy !== ''}
+                              title="Split this book again with the current parser"
+                              onClick={() => void redoSplit(dir)}>Re-split</button>
                       <button className="btn ghost tiny danger" onClick={() => setConfirming(dir)}>Remove</button>
                     </div>
                     {confirming === dir && (

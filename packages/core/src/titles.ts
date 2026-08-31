@@ -16,6 +16,21 @@ import type { Block, Chapter } from './types.js';
 const LOOKAHEAD = 12;
 const MAX_TITLE_CHARS = 90;
 
+/**
+ * A label that is only a number is not a title — "LAW 1", "Chapter 3", "IV".
+ * Those are the cases where the chapter's real name has to be recovered from the
+ * text. A label that already reads as a title is left exactly as the book wrote
+ * it; appending to it produced things like
+ * "1: The Surprising Power of Atomic Habits — The Fundamentals".
+ */
+function isEnumerator(label: string): boolean {
+  const bare = normalise(label)
+    .replace(/^(law|chapter|chap|ch|part|section|sect|book|no|number)\b\.?/, '')
+    .replace(/[^a-z0-9]/g, '');
+  if (bare === '') return true;
+  return /^(\d+|[ivxlcm]+)$/.test(bare);
+}
+
 function normalise(s: string): string {
   return s.toLowerCase().replace(/\s+/g, ' ').trim();
 }
@@ -83,7 +98,20 @@ export function deriveTitle(
   const derived = titleCase(parts.join(' ').replace(/\s+/g, ' ').trim());
   if (!derived) return label || 'Untitled';
   if (!label) return derived;
-  if (normalise(derived).includes(normalise(label))) return derived;
+
+  // The book already gave this chapter a name; do not decorate it.
+  if (!isEnumerator(label)) return label;
+
+  const a = normalise(derived);
+  const b = normalise(label);
+  // A bare number is the chapter's own numeral, which the label already carries.
+  // Appending it produces "1: The Surprising Power of Atomic Habits — 1".
+  if (/^[\d.,ivxlcm\s:-]+$/i.test(a)) return label;
+  // Either side already containing the other means the suffix says nothing new,
+  // which is what turned "THE FUNDAMENTALS: Why Tiny Changes…" into
+  // "THE FUNDAMENTALS: Why Tiny Changes… — The Fundamentals".
+  if (a.includes(b)) return derived;
+  if (b.includes(a)) return label;
   return `${label} — ${derived}`;
 }
 

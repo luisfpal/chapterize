@@ -1,8 +1,8 @@
 import {
   openEpub, detect, toChapters, deriveTitles, renderChapter, chapterFilename,
-  absorbTinyFirst, EpubError,
+  mergeStubs, imageFilename, EpubError,
 } from '@chapterize/core';
-import { native, bookFolderName, bytesOf, type BookIndex, type OutputFile } from './native';
+import { native, bookFolderName, bytesOf, type Annotation, type BookIndex, type OutputFile } from './native';
 
 /** A cover or half-title below this many characters is not a chapter. */
 const STUB_CHARS = 200;
@@ -24,7 +24,11 @@ export interface IngestResult {
  * The source file is never moved or altered: it is the user's, and it may live
  * anywhere they chose to keep it.
  */
-export async function ingest(epubPath: string, libraryDir: string): Promise<IngestResult> {
+export async function ingest(
+  epubPath: string,
+  libraryDir: string,
+  options: { copySource?: boolean } = {},
+): Promise<IngestResult> {
   const bytes = bytesOf(await native.readFile(epubPath));
 
   let book;
@@ -35,7 +39,7 @@ export async function ingest(epubPath: string, libraryDir: string): Promise<Inge
   }
 
   const detection = detect(book);
-  const cuts = absorbTinyFirst(detection.cuts, book.blocks, STUB_CHARS);
+  const cuts = mergeStubs(detection.cuts, book.blocks, STUB_CHARS);
   const chapters = deriveTitles(toChapters(cuts, book.blocks), book.blocks);
 
   const warnings: string[] = [];
@@ -73,6 +77,12 @@ export async function ingest(epubPath: string, libraryDir: string): Promise<Inge
   }
   await native.writeChapters(dir, files);
 
+  // Figures live beside the chapters so an exported folder is self-contained and
+  // the Markdown's relative image links resolve wherever it is opened.
+  for (const [path, bytes] of book.images) {
+    await native.writeBytes(`${dir}/chapters/images/${imageFilename(path)}`, Array.from(bytes));
+  }
+
   const index: BookIndex = {
     version: 1,
     title: book.metadata.title,
@@ -88,7 +98,8 @@ export async function ingest(epubPath: string, libraryDir: string): Promise<Inge
   };
   await native.writeText(`${dir}/index.json`, JSON.stringify(index, null, 2));
   await native.writeText(`${dir}/annotations.json`, '[]');
-  await native.copyInto(epubPath, dir, 'book.epub');
+  // Skipped when re-splitting, where the source already is the library's copy.
+  if (options.copySource !== false) await native.copyInto(epubPath, dir, 'book.epub');
 
   return { dir, index, warnings };
 }
@@ -105,5 +116,51 @@ export async function load(dir: string) {
   const annText = await native.readText(`${dir}/annotations.json`);
   const annotations = annText ? JSON.parse(annText) : [];
 
-  return { dir, index, blocks: book.blocks, annotations };
+  // Object URLs, so the reader shows figures without inlining megabytes of
+  // base64 into the DOM. Revoked when the book is closed.
+  const imageUrls = new Map<string, string>();
+  for (const [path, data] of book.images) {
+    const copy = new Uint8Array(data);
+    imageUrls.set(path, URL.createObjectURL(new Blob([copy.buffer as ArrayBuffer])));
+  }
+
+  return { dir, index, blocks: book.blocks, annotations, imageUrls };
+}
+
+
+/**
+ * Re-split a book already in the library, after a parser improvement.
+ *
+ * Block indices move when parsing changes, so annotations cannot simply be kept:
+ * their offsets would land on unrelated words. Each highlight is re-anchored by
+ * searching the new blocks for the text it recorded, which is why the quote is
+ * stored alongside the offsets in the first place. Anything whose text no longer
+ * appears is reported rather than silently relocated.
+ */
+export async function resplit(dir: string, libraryDir: string): Promise<IngestResult & { orphaned: number }> {
+  const existingText = await native.readText(`${dir}/annotations.json`);
+  const existing: Annotation[] = existingText ? JSON.parse(existingText) : [];
+
+  const result = await ingest(`${dir}/book.epub`, libraryDir, { copySource: false });
+
+  if (!existing.length) return { ...result, orphaned: 0 };
+
+  const bytes = bytesOf(await native.readFile(`${result.dir}/book.epub`));
+  const { blocks } = openEpub(bytes);
+
+  const reanchored: Annotation[] = [];
+  let orphaned = 0;
+  for (const note of existing) {
+    // Search near the old position first: a book rarely repeats a sentence, but
+    // when it does, the nearest match is the intended one.
+    const order = blocks
+      .map((block, at) => ({ block, at }))
+      .sort((a, b) => Math.abs(a.at - note.block) - Math.abs(b.at - note.block));
+    const hit = order.find(({ block }) => block.text.includes(note.quote));
+    if (!hit) { orphaned++; continue; }
+    const start = hit.block.text.indexOf(note.quote);
+    reanchored.push({ ...note, block: hit.at, start, end: start + note.quote.length });
+  }
+  await native.writeText(`${result.dir}/annotations.json`, JSON.stringify(reanchored, null, 2));
+  return { ...result, orphaned };
 }

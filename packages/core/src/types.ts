@@ -30,8 +30,18 @@ export interface Block {
   tag: string;
   /** Heading level 1-6, or 0 when this block is not a heading. */
   heading: number;
-  /** Plain text content, whitespace-collapsed. */
+  /** Plain text content, whitespace-collapsed. Annotation offsets index into this. */
   text: string;
+  /**
+   * Inline markup only — `<em>`, `<strong>`, `<sup>`… with every attribute
+   * stripped. Concatenating its text nodes reproduces `text` exactly, which is
+   * what lets annotation offsets survive rendering.
+   */
+  html: string;
+  /** Set when this block is a figure; path of the image inside the EPUB. */
+  image?: string;
+  /** Alt text, when the source provided one. */
+  alt?: string;
 }
 
 /** Where a chapter begins. Auto-detection and manual edits both produce these. */
@@ -110,6 +120,8 @@ export interface Book {
   spine: SpineItem[];
   blocks: Block[];
   toc: TocEntry[];
+  /** Image bytes by path, for the figures the blocks reference. */
+  images: Map<string, Uint8Array>;
   /** How the TOC was obtained; 'none' when the book has neither nav nor NCX. */
   tocSource: 'nav' | 'ncx' | 'none';
 }
