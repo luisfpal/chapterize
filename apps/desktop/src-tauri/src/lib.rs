@@ -8,7 +8,8 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-use tauri::Manager;
+use std::sync::Mutex;
+use tauri::{Emitter, Manager};
 
 #[derive(Serialize)]
 pub struct AppDirs {
@@ -155,9 +156,49 @@ fn list_library(dir: String) -> Result<Vec<String>, String> {
     Ok(out)
 }
 
+/// Books handed to the app on the command line — by the file manager opening an
+/// EPUB, or by a second launch while one is already running.
+#[derive(Default)]
+struct PendingFiles(Mutex<Vec<String>>);
+
+/// EPUB paths in an argument list, ignoring the binary name and any flags.
+fn epubs_from_args<I: IntoIterator<Item = String>>(args: I) -> Vec<String> {
+    args.into_iter()
+        .skip(1)
+        .filter(|a| !a.starts_with('-'))
+        .filter(|a| a.to_lowercase().ends_with(".epub"))
+        .collect()
+}
+
+/// Hand over anything queued and clear it, so files are imported exactly once.
+#[tauri::command]
+fn pending_files(state: tauri::State<'_, PendingFiles>) -> Vec<String> {
+    state
+        .0
+        .lock()
+        .map(|mut queue| std::mem::take(&mut *queue))
+        .unwrap_or_default()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // Must be registered first. Opening a second book should reach the window
+        // that is already open rather than start a rival copy of the library.
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            let files = epubs_from_args(argv);
+            if !files.is_empty() {
+                if let Ok(mut queue) = app.state::<PendingFiles>().0.lock() {
+                    queue.extend(files);
+                }
+                let _ = app.emit("files-opened", ());
+            }
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.set_focus();
+            }
+        }))
+        .manage(PendingFiles(Mutex::new(epubs_from_args(std::env::args()))))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -170,6 +211,7 @@ pub fn run() {
             copy_into,
             remove_book,
             list_library,
+            pending_files,
         ])
         .run(tauri::generate_context!())
         .expect("error while running chapterize");

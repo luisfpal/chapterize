@@ -15,12 +15,18 @@ Everything runs locally. Books never leave the machine.
 ## Install
 
 ### Linux
-Download the `.AppImage` from [Releases](../../releases), then:
+Install the `.deb` from [Releases](../../releases):
 ```bash
-chmod +x Chapterize_*.AppImage
-./Chapterize_*.AppImage
+sudo dpkg -i Chapterize_*.deb
 ```
-Or install the `.deb`: `sudo dpkg -i Chapterize_*.deb`
+Chapterize then behaves like any other installed application: it appears in your
+app grid, you can search it by "epub" or "book", pin it to the dock, and
+double-click an `.epub` in your file manager to open it. Opening a second book
+while it is running sends the file to the existing window rather than starting a
+second copy.
+
+Prefer no install? The `.AppImage` runs standalone — `chmod +x` it and go — but it
+will not register in your app menu or handle `.epub` files.
 
 ### macOS — required on first launch
 The builds are unsigned, so Gatekeeper refuses them with *"Chapterize is damaged

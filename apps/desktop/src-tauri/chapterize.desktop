@@ -1,0 +1,15 @@
+[Desktop Entry]
+Type=Application
+Name={{name}}
+Comment={{comment}}
+Exec={{exec}} %U
+Icon={{icon}}
+Categories={{categories}}
+Terminal=false
+StartupNotify=true
+# Binds the running window to this launcher, so pinning to the dock keeps one
+# icon instead of spawning a second, unnamed one. Must equal the window's
+# WM_CLASS instance name, which Tauri derives from the binary name.
+StartupWMClass=chapterize
+MimeType=application/epub+zip;
+Keywords=epub;ebook;book;reader;chapter;split;ai;study;

@@ -17,14 +17,21 @@
         "height": 820,
         "minWidth": 900,
         "minHeight": 600,
-        "dragDropEnabled": true
+        "dragDropEnabled": true,
+        "label": "main"
       }
     ],
-    "security": { "csp": null }
+    "security": {
+      "csp": null
+    }
   },
   "bundle": {
     "active": true,
-    "targets": ["deb", "appimage", "dmg"],
+    "targets": [
+      "deb",
+      "appimage",
+      "dmg"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -34,6 +41,32 @@
     ],
     "category": "Education",
     "shortDescription": "Read one chapter at a time, with AI",
-    "longDescription": "Split an EPUB into one file per chapter, read chapters, annotate them, and export them for a language model."
+    "longDescription": "Split an EPUB into one file per chapter, read chapters, annotate them, and export them for a language model.",
+    "fileAssociations": [
+      {
+        "ext": [
+          "epub"
+        ],
+        "name": "EPUB book",
+        "description": "EPUB book",
+        "mimeType": "application/epub+zip",
+        "role": "Viewer"
+      }
+    ],
+    "linux": {
+      "deb": {
+        "desktopTemplate": "chapterize.desktop",
+        "files": {
+          "/usr/share/mime/packages/chapterize.xml": "chapterize.xml",
+          "/usr/share/icons/hicolor/16x16/apps/chapterize.png": "icons/hicolor/16x16/apps/chapterize.png",
+          "/usr/share/icons/hicolor/22x22/apps/chapterize.png": "icons/hicolor/22x22/apps/chapterize.png",
+          "/usr/share/icons/hicolor/24x24/apps/chapterize.png": "icons/hicolor/24x24/apps/chapterize.png",
+          "/usr/share/icons/hicolor/48x48/apps/chapterize.png": "icons/hicolor/48x48/apps/chapterize.png",
+          "/usr/share/icons/hicolor/64x64/apps/chapterize.png": "icons/hicolor/64x64/apps/chapterize.png",
+          "/usr/share/icons/hicolor/256x256/apps/chapterize.png": "icons/hicolor/256x256/apps/chapterize.png",
+          "/usr/share/icons/hicolor/512x512/apps/chapterize.png": "icons/hicolor/512x512/apps/chapterize.png"
+        }
+      }
+    }
   }
 }

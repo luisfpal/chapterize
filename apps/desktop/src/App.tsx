@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { revealItemInDir } from '@tauri-apps/plugin-opener';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
+import { listen } from '@tauri-apps/api/event';
 import { estimateTokens } from '@chapterize/core';
 import { native, type AppDirs, type BookIndex, type LoadedBook } from './native';
 import { ingest, load } from './ingest';
@@ -88,6 +89,20 @@ export function App() {
     if (!picked) return;
     await importPaths(Array.isArray(picked) ? picked : [picked]);
   }, [importPaths]);
+
+  // Books opened from the file manager, or passed to a second launch that the
+  // single-instance guard routed here instead of starting another copy.
+  const drainPending = useCallback(async () => {
+    const queued = await native.pendingFiles();
+    if (queued.length) await importPaths(queued);
+  }, [importPaths]);
+
+  useEffect(() => {
+    if (!dirs) return;
+    void drainPending();
+    const unlisten = listen('files-opened', () => void drainPending());
+    return () => { void unlisten.then((f) => f()); };
+  }, [dirs, drainPending]);
 
   // Dropping books on the window is the other half of "books live anywhere".
   useEffect(() => {

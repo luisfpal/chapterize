@@ -53,6 +53,19 @@ to need one, the block model is wrong and that is the thing to fix.
 - Report why a TOC entry failed to resolve, precisely. An image-only cover with
   no text is normal; a TOC pointing outside the spine is a malformed book.
 
+## Desktop integration rules
+
+- `StartupWMClass` in the `.desktop` file must equal the window's WM_CLASS
+  instance name (`chapterize`, from the binary name). Without the match, GNOME
+  cannot bind the running window to the launcher and pinning to the dock produces
+  a second, nameless icon. Verify with `xprop -id <win> WM_CLASS`.
+- `Exec` needs `%U`, or the file manager cannot hand the app a book.
+- The single-instance plugin must be registered **first** in the builder chain.
+  Opening a book while the app runs has to reach the existing window; a second
+  library process fighting over the same JSON files is a corruption bug waiting.
+- Ship the full `hicolor` icon size range. GNOME picks different sizes for the
+  dock, the grid, and the window list, and a missing size renders blurry.
+
 ## Verification
 
 `npm test` runs against the user's **real library** under

@@ -12,6 +12,8 @@ export const native = {
   copyInto: (source: string, dir: string, name: string) => invoke<string>('copy_into', { source, dir, name }),
   removeBook: (dir: string) => invoke<void>('remove_book', { dir }),
   listLibrary: (dir: string) => invoke<string[]>('list_library', { dir }),
+  /** EPUBs the OS handed us — drains the queue, so each file imports once. */
+  pendingFiles: () => invoke<string[]>('pending_files'),
 };
 
 export interface AppDirs { library: string; config: string }
