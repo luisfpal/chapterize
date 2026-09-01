@@ -133,6 +133,14 @@ sudo apt install libwebkit2gtk-4.1-dev libxdo-dev \
 in Node, in the webview, and would run in a CLI unchanged. The Rust side does only
 what a webview cannot: read arbitrary files, write the library, move the original.
 
-The test suite reads real EPUBs from `$CHAPTERIZE_FIXTURES` rather than
-synthetic fixtures, and skips itself when they are absent. Every parser bug found
-so far was invisible to hand-written fixtures.
+The parser suite runs against **real EPUBs**, not synthetic fixtures — every
+parser bug found so far was invisible to fixtures written by hand, because a
+fixture encodes the assumptions of whoever wrote it. Point it at a directory of
+your own books:
+
+```bash
+CHAPTERIZE_FIXTURES=/path/to/epubs npm test
+```
+
+Without the variable the structural tests skip and the unit tests still run, so a
+fresh clone is green.

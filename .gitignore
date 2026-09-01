@@ -3,5 +3,16 @@ dist/
 target/
 *.log
 .DS_Store
-test/fixtures/*.epub
+
+# Books, and anything that reveals which books. The parser suite reads a real
+# shelf via CHAPTERIZE_FIXTURES; none of it belongs in the repository.
+*.epub
+*.azw3
+*.mobi
+library/
+test/fixtures/
+
+# Working notes and plans — local to the maintainer, not part of the project.
+internal_docs/
+
 apps/desktop/src-tauri/target/

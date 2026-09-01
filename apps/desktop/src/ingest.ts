@@ -1,6 +1,6 @@
 import {
   openEpub, detect, toChapters, deriveTitles, renderChapter, chapterFilename,
-  mergeStubs, imageFilename, countWords, readingMinutes, estimateTokens, EpubError,
+  mergeStubs, imageFilename, countWords, readingMinutes, EpubError,
 } from '@chapterize/core';
 import type { CutPoint } from '@chapterize/core';
 import {
@@ -104,7 +104,6 @@ export async function ingest(
       index: c.index, title: c.title, start: c.start, end: c.end, chars: c.chars,
       file: names[i] ?? '',
       words: wordCounts[i] ?? 0,
-      approxTokens: estimateTokens(c.chars),
     })),
     progress: {},
     finished: [],
@@ -213,7 +212,7 @@ export async function saveSplit(
     });
     stored.push({
       index: i, title: chapter.title, start: chapter.start, end: chapter.end,
-      chars: chapter.chars, file: name, words, approxTokens: estimateTokens(chapter.chars),
+      chars: chapter.chars, file: name, words,
     });
   }
 

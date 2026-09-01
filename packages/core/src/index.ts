@@ -6,7 +6,7 @@ export {
 } from './chapters.js';
 export { deriveTitles, deriveTitle, findBoilerplate } from './titles.js';
 export {
-  renderChapter, estimateTokens, countWords, readingMinutes,
+  renderChapter, countWords, readingMinutes,
   slugify, chapterFilename, imageFilename, inlineMarkdown,
   type RenderOptions,
 } from './markdown.js';

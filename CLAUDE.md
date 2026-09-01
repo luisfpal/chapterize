@@ -111,6 +111,8 @@ to need one, the block model is wrong and that is the thing to fix.
 
 ## Verification
 
-`npm test` runs against the user's **real library** under
-`$CHAPTERIZE_FIXTURES` — not synthetic fixtures. Those books are not
-committed. If they are absent the suite skips rather than fails.
+`npm test` runs against **real EPUBs**, not synthetic fixtures — every parser bug
+so far was invisible to hand-written ones. Set `CHAPTERIZE_FIXTURES` to a
+colon-separated list of directories holding `.epub` files. Without it the
+structural tests skip and the unit tests still run, so a fresh clone is green.
+No shelf path belongs in this repository.

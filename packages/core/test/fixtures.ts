@@ -2,17 +2,18 @@ import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
 /**
- * Real books, not synthetic ones. These cover every structural case that
- * matters — 1:1 files, chapters spanning many files, chapters starting mid-file,
- * EPUB 2 NCX and EPUB 3 nav, and a book with more chapters than most tools
- * expect. They are the user's own library and are never committed.
+ * Where the real books live.
+ *
+ * Parsing bugs in this project were all found by real EPUBs and invisible to
+ * hand-written fixtures, so the suite runs against a real shelf — but nobody
+ * else's shelf is at the same path, and a maintainer's reading list is not
+ * something a public repository should carry. Point CHAPTERIZE_FIXTURES at a
+ * directory of .epub files to run these tests; without it they skip.
  */
-const HOME = process.env['HOME'] ?? '';
-/** The user's shelf, plus whatever the app itself has already imported. */
-const ROOTS = [
-  join(HOME, '$CHAPTERIZE_FIXTURES'),
-  join(HOME, '.local/share/dev.l11.chapterize/library'),
-];
+const ROOTS = (process.env['CHAPTERIZE_FIXTURES'] ?? '')
+  .split(':')
+  .filter(Boolean);
+
 /** Scratch copies made during calibration would otherwise be counted twice. */
 const EXCLUDE = /_chapterize_experiment/;
 
@@ -57,4 +58,23 @@ export function bookPath(needle: string): string {
 
 export function loadBook(needle: string): Uint8Array {
   return new Uint8Array(readFileSync(bookPath(needle)));
+}
+
+/**
+ * Memoised loader for use inside `describe` blocks.
+ *
+ * `describe.runIf(false)` still executes its callback while collecting tests, so
+ * a `loadBook()` call at describe scope throws before the guard can skip
+ * anything — taking the whole file down, unit tests included. Defer the read to
+ * first use inside an `it`, where the guard has already applied.
+ */
+const cache = new Map<string, Uint8Array>();
+export function lazyBook(needle: string): () => Uint8Array {
+  return () => {
+    const hit = cache.get(needle);
+    if (hit) return hit;
+    const bytes = loadBook(needle);
+    cache.set(needle, bytes);
+    return bytes;
+  };
 }

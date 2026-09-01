@@ -1,14 +1,5 @@
 import type { Block, Chapter } from './types.js';
 
-/**
- * Rough token estimate. Kept for `index.json`, where an agent may want it, and
- * deliberately absent from the interface: no reading decision depends on it, and
- * no open-source tokenizer matches Claude anyway.
- */
-export function estimateTokens(chars: number): number {
-  return Math.round(chars / 4);
-}
-
 /** Words, counted the way a reader would. */
 export function countWords(text: string): number {
   const trimmed = text.trim();

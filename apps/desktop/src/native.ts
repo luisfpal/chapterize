@@ -64,8 +64,6 @@ export interface StoredChapter {
   file: string;
   /** Words of prose. Reading time derives from this. */
   words: number;
-  /** Rough token estimate, for agents reading index.json. Never shown in the UI. */
-  approxTokens: number;
 }
 
 export interface LoadedBook {

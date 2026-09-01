@@ -6,7 +6,7 @@ import { detect, detectFromToc } from '../src/detect.js';
 import { toChapters, limitCount, mergeSmall, mergeStubs } from '../src/chapters.js';
 import { deriveTitles } from '../src/titles.js';
 import { inlineMarkdown, renderChapter, countWords, readingMinutes } from '../src/markdown.js';
-import { allBooks, libraryAvailable, loadBook } from './fixtures.js';
+import { allBooks, lazyBook, libraryAvailable, loadBook } from './fixtures.js';
 
 describe('resolvePath', () => {
   it('resolves relative to the referring document, not the zip root', () => {
@@ -49,9 +49,11 @@ describe.runIf(libraryAvailable())('real library', () => {
 });
 
 describe.runIf(libraryAvailable())('The 48 Laws of Power — EPUB 2, NCX, one file per chapter', () => {
-  const book = openEpub(loadBook('Laws of Power'));
+  const load = lazyBook('Laws of Power');
+  const open = () => openEpub(load());
 
   it('reads EPUB 2 metadata and the NCX table of contents', () => {
+    const book = open();
     expect(book.metadata.epubVersion).toBe('2.0');
     expect(book.tocSource).toBe('ncx');
     expect(book.metadata.title).toContain('48 Laws of Power');
@@ -59,12 +61,14 @@ describe.runIf(libraryAvailable())('The 48 Laws of Power — EPUB 2, NCX, one fi
   });
 
   it('detects roughly one chapter per law', () => {
+    const book = open();
     const { cuts, unresolved } = detectFromToc(book);
     expect(cuts.length).toBeGreaterThanOrEqual(50);
     expect(unresolved).toHaveLength(0);
   });
 
   it('recovers the real law titles that live in no heading', () => {
+    const book = open();
     const chapters = deriveTitles(toChapters(detect(book).cuts, book.blocks), book.blocks);
     const titles = chapters.map((c) => c.title).join('\n');
     expect(titles).toMatch(/Never Outshine the Master/i);
@@ -72,6 +76,7 @@ describe.runIf(libraryAvailable())('The 48 Laws of Power — EPUB 2, NCX, one fi
   });
 
   it('does not name every chapter after the book, which the raw h1 would', () => {
+    const book = open();
     const chapters = deriveTitles(toChapters(detect(book).cuts, book.blocks), book.blocks);
     const named = chapters.filter((c) => /^48 Laws of Power$/i.test(c.title));
     // The h1 "48 Laws of Power" repeats in all 51 chapters, so boilerplate
@@ -84,6 +89,7 @@ describe.runIf(libraryAvailable())('The 48 Laws of Power — EPUB 2, NCX, one fi
   });
 
   it('joins a display title split across several elements', () => {
+    const book = open();
     const chapters = deriveTitles(toChapters(detect(book).cuts, book.blocks), book.blocks);
     const law7 = chapters.find((c) => /LAW 7\b/i.test(c.title));
     expect(law7?.title).toMatch(/Get Others to Do the Work/i);
@@ -314,9 +320,11 @@ describe.runIf(libraryAvailable())('exported chapters are valid Markdown', () =>
 });
 
 describe.runIf(libraryAvailable())('non-linear documents and footnotes', () => {
-  const book = openEpub(loadBook('Atomic Habits'));
+  const load = lazyBook('Atomic Habits');
+  const open = () => openEpub(load());
 
   it('keeps linear="no" documents out of the reading flow', () => {
+    const book = open();
     // 35 of this book's 78 spine documents are one-note-per-file footnote
     // holders marked linear="no". Folding them in put a chapter-1 footnote into
     // the back matter as loose text thirty chapters away.
@@ -325,17 +333,20 @@ describe.runIf(libraryAvailable())('non-linear documents and footnotes', () => {
   });
 
   it('captures note bodies so a reference can reach them', () => {
+    const book = open();
     expect(book.notes.size).toBeGreaterThan(0);
     expect(book.blocks.filter((b) => b.noterefs?.length).length).toBeGreaterThan(0);
   });
 
   it('every reference resolves to a real note', () => {
+    const book = open();
     const refs = book.blocks.flatMap((b) => b.noterefs ?? []);
     const unresolved = refs.filter((r) => !book.notes.has(r.key));
     expect(unresolved).toHaveLength(0);
   });
 
   it('renders numbered Markdown footnotes with their text', () => {
+    const book = open();
     const chapters = deriveTitles(
       toChapters(mergeStubs(detect(book).cuts, book.blocks, 200), book.blocks), book.blocks,
     );
