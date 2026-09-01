@@ -299,6 +299,103 @@ fn pending_files(state: tauri::State<'_, PendingFiles>) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// Where the Send-to-Kindle app password lives: the OS keyring, never a file.
+const KEYRING_SERVICE: &str = "dev.l11.chapterize";
+const KEYRING_USER: &str = "smtp-app-password";
+
+#[derive(Deserialize)]
+pub struct KindleConfig {
+    /// The @kindle.com address of the device to deliver to.
+    to: String,
+    /// The sender, which must be on Amazon's Approved Personal Document list.
+    from: String,
+    /// e.g. "smtp.gmail.com".
+    host: String,
+    port: u16,
+}
+
+/// Store the app password in the OS keyring. It never touches settings or disk.
+#[tauri::command]
+fn save_kindle_password(password: String) -> Result<(), String> {
+    keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER)
+        .and_then(|e| e.set_password(&password))
+        .map_err(|e| format!("Could not save to the system keyring: {e}"))
+}
+
+#[tauri::command]
+fn has_kindle_password() -> bool {
+    keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER)
+        .and_then(|e| e.get_password())
+        .is_ok()
+}
+
+#[tauri::command]
+fn forget_kindle_password() -> Result<(), String> {
+    match keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER).and_then(|e| e.delete_credential()) {
+        Ok(()) => Ok(()),
+        Err(keyring::Error::NoEntry) => Ok(()),
+        Err(e) => Err(format!("Could not clear the keyring entry: {e}")),
+    }
+}
+
+/// Mail the whole book to a Kindle device.
+///
+/// Whole book only, never chapters: Amazon converts one file into one library
+/// entry, so fifty chapters would arrive as fifty unrelated "books". Chapters
+/// stay on this machine, which is what they are for.
+#[tauri::command]
+fn send_to_kindle(path: String, config: KindleConfig) -> Result<String, String> {
+    use lettre::message::{header::ContentType, Attachment, MultiPart, SinglePart};
+    use lettre::transport::smtp::authentication::Credentials;
+    use lettre::{Message, SmtpTransport, Transport};
+
+    let file = expand(&path);
+    let bytes = fs::read(&file).map_err(|e| format!("Cannot read {}: {e}", file.display()))?;
+    // Amazon rejects personal documents above 50 MB; mail servers usually stop
+    // sooner. Fail here with a clear reason rather than after a long upload.
+    if bytes.len() > 25 * 1024 * 1024 {
+        return Err(format!(
+            "{:.1} MB is too large to e-mail. Use the web uploader instead, which accepts up to 200 MB.",
+            bytes.len() as f64 / 1_048_576.0
+        ));
+    }
+    let name = file
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("book.epub")
+        .to_string();
+
+    let password = keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER)
+        .and_then(|e| e.get_password())
+        .map_err(|_| "No app password saved. Add one in Kindle settings.".to_string())?;
+
+    let attachment = Attachment::new(name.clone()).body(
+        bytes,
+        ContentType::parse("application/epub+zip").map_err(|e| e.to_string())?,
+    );
+
+    let email = Message::builder()
+        .from(config.from.parse().map_err(|e| format!("Bad sender address: {e}"))?)
+        .to(config.to.parse().map_err(|e| format!("Bad Kindle address: {e}"))?)
+        // Amazon ignores the subject for EPUB personal documents, but a blank
+        // one makes the message look like spam to intermediate relays.
+        .subject("Convert")
+        .multipart(MultiPart::mixed().singlepart(SinglePart::plain(String::new())).singlepart(attachment))
+        .map_err(|e| format!("Could not build the message: {e}"))?;
+
+    let creds = Credentials::new(config.from.clone(), password);
+    let mailer = SmtpTransport::starttls_relay(&config.host)
+        .map_err(|e| format!("Cannot reach {}: {e}", config.host))?
+        .port(config.port)
+        .credentials(creds)
+        .build();
+
+    mailer
+        .send(&email)
+        .map(|_| format!("Sent {name} to {}", config.to))
+        .map_err(|e| format!("Send failed: {e}. Check the app password, and that the sender is on Amazon's Approved Personal Document list."))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -331,6 +428,10 @@ pub fn run() {
             write_chapters,
             ensure_analysis,
             list_analysis,
+            save_kindle_password,
+            has_kindle_password,
+            forget_kindle_password,
+            send_to_kindle,
             copy_into,
             remove_book,
             list_library,

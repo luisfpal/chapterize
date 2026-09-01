@@ -17,12 +17,31 @@ export const native = {
   copyInto: (source: string, dir: string, name: string) => invoke<string>('copy_into', { source, dir, name }),
   removeBook: (dir: string) => invoke<void>('remove_book', { dir }),
   listLibrary: (dir: string) => invoke<string[]>('list_library', { dir }),
+  /** Send-to-Kindle: the app password lives in the OS keyring, never on disk. */
+  saveKindlePassword: (password: string) => invoke<void>('save_kindle_password', { password }),
+  hasKindlePassword: () => invoke<boolean>('has_kindle_password'),
+  forgetKindlePassword: () => invoke<void>('forget_kindle_password'),
+  sendToKindle: (path: string, config: KindleConfig) =>
+    invoke<string>('send_to_kindle', { path, config }),
   /** EPUBs the OS handed us — drains the queue, so each file imports once. */
   pendingFiles: () => invoke<string[]>('pending_files'),
 };
 
 export interface AppDirs { library: string; config: string }
 export interface AnalysisFile { name: string; path: string; size: number; modified: number }
+
+/** Non-secret half of the Kindle setup; the password is in the OS keyring. */
+export interface KindleConfig { to: string; from: string; host: string; port: number }
+
+export const KINDLE_KEY = 'chapterize.kindle.v1';
+
+export function loadKindleConfig(): KindleConfig {
+  try {
+    const raw = localStorage.getItem(KINDLE_KEY);
+    if (raw) return JSON.parse(raw) as KindleConfig;
+  } catch { /* fall through to defaults */ }
+  return { to: '', from: '', host: 'smtp.gmail.com', port: 587 };
+}
 export interface OutputFile { name: string; contents: string }
 
 /** A highlight, anchored to our own block model rather than to CSS selectors. */

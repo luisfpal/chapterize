@@ -7,6 +7,7 @@ import { readingMinutes } from '@chapterize/core';
 import { native, type AppDirs, type BookIndex, type LoadedBook } from './native';
 import { ingest, load, resplit } from './ingest';
 import { BookView } from './Book';
+import { KindleDialog } from './Kindle';
 
 interface Shelf { dir: string; index: BookIndex }
 
@@ -18,6 +19,7 @@ export function App() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [confirming, setConfirming] = useState<string | null>(null);
+  const [kindle, setKindle] = useState<{ path: string; title: string } | null>(null);
   const [dropping, setDropping] = useState(false);
   const importing = useRef(false);
 
@@ -245,6 +247,10 @@ export function App() {
                       <button className="btn ghost tiny" disabled={busy !== ''}
                               title="Split this book again with the current parser"
                               onClick={() => void redoSplit(dir)}>Re-split</button>
+                      <button className="btn ghost tiny" title="Send the whole book to your Kindle"
+                              onClick={() => setKindle({ path: `${dir}/book.epub`, title: index.title })}>
+                        Kindle
+                      </button>
                       <button className="btn ghost tiny danger" onClick={() => setConfirming(dir)}>Remove</button>
                     </div>
                     {confirming === dir && (
@@ -276,6 +282,15 @@ export function App() {
       </div>
 
       {dropping && <div className="dropzone"><span>Drop EPUB files to add them</span></div>}
+
+      {kindle && (
+        <KindleDialog
+          bookPath={kindle.path}
+          bookTitle={kindle.title}
+          onDone={(m) => setNotice(m)}
+          onClose={() => setKindle(null)}
+        />
+      )}
     </div>
   );
 }

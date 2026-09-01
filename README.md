@@ -79,8 +79,32 @@ library/The 48 Laws of Power — Robert Greene/
 Nothing is in a database, so your notes stay readable and greppable, and they
 outlive the app. **Library folder** in the footer opens it in your file manager.
 
-DRM-protected books (Kindle, Kobo, Google Play) cannot be opened by this or any
-other tool — the file is encrypted before it reaches us.
+### Sending a book to your Kindle
+
+**Kindle** on a book sends the **whole book**, never chapters — Amazon turns one
+file into one library entry, so a split book would arrive as dozens of unrelated
+"books". Chapters exist for reading here and for feeding agents.
+
+Two routes:
+
+- **Web uploader** — opens Amazon's page and reveals the file to drag in.
+  Nothing is stored, no password needed.
+- **E-mail** — fully automatic. Needs an *app password*, kept in your operating
+  system's keyring, never in a file. The sending address must be on Amazon's
+  *Approved Personal Document E-mail List* or Amazon discards the message
+  silently. Enable *Personal Document Archiving* and the book reaches every
+  device on your account.
+
+### What cannot work, and why
+
+**Books do not come back from Kindle.** Purchases are DRM-encrypted, and Amazon
+removed "Download & transfer via USB" — for personal documents the only remaining
+actions are *Mark as Read* and *Add to Collection*. So the flow is one-way:
+Chapterize → Kindle → all your devices. Nothing here can read a book out of your
+Amazon library, and no tool can, short of breaking DRM.
+
+DRM-protected books (Kindle, Kobo, Google Play) likewise cannot be opened here —
+the file is encrypted before it reaches us.
 
 ---
 
