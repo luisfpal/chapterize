@@ -373,4 +373,12 @@ describe('reading time', () => {
     // Never reports zero: a short chapter still costs the reader a moment.
     expect(readingMinutes(5)).toBe(1);
   });
+
+  it('never yields NaN for a library split before word counts existed', () => {
+    // Those index.json files have no `words`, and NaN reached the interface as
+    // "~NaN min" on every row rather than failing anywhere visible.
+    expect(readingMinutes(undefined as unknown as number)).toBe(1);
+    expect(readingMinutes(NaN)).toBe(1);
+    expect(readingMinutes(-10)).toBe(1);
+  });
 });

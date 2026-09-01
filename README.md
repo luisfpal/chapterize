@@ -51,7 +51,14 @@ xattr -cr /Applications/Chapterize.app
    can tick a single chapter and keep the others out of the answer.
 
 Keys: `j`/`k` scroll · `n`/`p` chapter · `h` highlight · `m` mark read ·
-`−`/`+` text size · `Esc` library.
+`e` edit split · `/` find · `−`/`+` text size · `Esc` back.
+
+**Find** searches the whole book and shows each hit with its chapter and
+surrounding sentence. **Listen** reads the chapter aloud through the operating
+system's speech service — speech-dispatcher on Linux (`sudo apt install
+speech-dispatcher espeak-ng`), `say` on macOS. **Double-click any word** for its
+definition; that lookup is the only network request this application makes, and
+it sends one word, never a passage.
 
 ### Where your library lives
 

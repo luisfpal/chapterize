@@ -128,6 +128,19 @@ export async function load(dir: string) {
   const bytes = bytesOf(await native.readFile(`${dir}/${index.epubFile}`));
   const book = openEpub(bytes);
 
+  // Libraries split before word counts existed carry no `words`, which the
+  // reader would render as "~NaN min". Fill them in once, from the blocks we
+  // just parsed, and persist so the repair happens only on first open.
+  const missingWords = index.chapters.some((c) => !Number.isFinite(c.words));
+  if (missingWords) {
+    index.chapters = index.chapters.map((c) => ({
+      ...c,
+      words: countWords(book.blocks.slice(c.start, c.end).map((b) => b.text).join(' ')),
+    }));
+    index.version = 2;
+    await native.writeText(`${dir}/index.json`, JSON.stringify(index, null, 2));
+  }
+
   const annText = await native.readText(`${dir}/annotations.json`);
   const annotations = annText ? JSON.parse(annText) : [];
 

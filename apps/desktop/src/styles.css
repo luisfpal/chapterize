@@ -454,3 +454,9 @@ sup.noteref:hover { background: var(--accent-soft); }
 }
 /* Four actions did not fit one line, clipping "Remove". */
 .card-tools { flex-wrap: wrap; row-gap: 4px; }
+
+/* ── reading aloud + dictionary ────────────────────────────────────── */
+.reader-col .speaking { background: var(--accent-soft); border-radius: var(--r-sm); }
+.define { padding: 12px 16px 18px; font-size: 13.5px; line-height: 1.55; }
+.define p { margin: 0 0 10px; }
+.define em { color: var(--text-faint); font-size: 0.85em; margin-right: 6px; }

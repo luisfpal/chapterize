@@ -6,6 +6,7 @@ import { revealItemInDir } from '@tauri-apps/plugin-opener';
 import { native, type Annotation, type BookIndex, type LoadedBook } from './native';
 import { saveSplit } from './ingest';
 import { Analysis } from './Analysis';
+import { SearchPanel, useSpeech, define, type Definition } from './Tools';
 
 const COLORS = [1, 2, 3, 4] as const;
 
@@ -200,7 +201,8 @@ export function BookView({ book, onBack, onExport }: Props) {
   const [draft, setDraft] = useState('');
   const [size, setSize] = useState(18);
   const [widths, setWidths] = useState(loadWidths);
-  const [tab, setTab] = useState<'notes' | 'analysis'>('notes');
+  const [tab, setTab] = useState<'notes' | 'analysis' | 'search'>('notes');
+  const [lookup, setLookup] = useState<{ word: string; defs: Definition[]; error: string } | null>(null);
   const [editing, setEditing] = useState(false);
   const [cuts, setCuts] = useState<CutPoint[] | null>(null);
   const [history, setHistory] = useState<CutPoint[][]>([]);
@@ -209,6 +211,29 @@ export function BookView({ book, onBack, onExport }: Props) {
   const readerRef = useRef<HTMLDivElement>(null);
 
   const chapter = index.chapters[current];
+  const speech = useSpeech();
+
+  /** Jump to a search hit: switch chapter, then scroll the block into view. */
+  const goToBlock = useCallback((chapterIndex: number, block: number) => {
+    if (chapterIndex >= 0) setCurrent(chapterIndex);
+    window.setTimeout(() => {
+      readerRef.current
+        ?.querySelector(`[data-block="${block}"]`)
+        ?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }, 80);
+  }, []);
+
+  /** Double-clicking a word looks it up — this library is half language study. */
+  const onDoubleClick = useCallback(async () => {
+    const word = window.getSelection()?.toString().trim() ?? '';
+    if (!word || /\s/.test(word)) return;
+    setLookup({ word, defs: [], error: '' });
+    try {
+      setLookup({ word, defs: await define(word), error: '' });
+    } catch (e) {
+      setLookup({ word, defs: [], error: e instanceof Error ? e.message : String(e) });
+    }
+  }, []);
 
   const setPane = useCallback((side: 'left' | 'right', next: number) => {
     setWidths((c) => {
@@ -402,9 +427,12 @@ export function BookView({ book, onBack, onExport }: Props) {
       else if (e.key === 'h' && !editing) capture();
       else if (e.key === 'm' && !editing) void toggleFinished();
       else if (e.key === 'e') editing ? setEditing(false) : enterEdit();
+      else if (e.key === '/') { e.preventDefault(); setTab('search'); }
       else if (e.key === 'u' && editing) undo();
       else if (e.key === 'Escape') {
-        if (note) setNote(null);
+        if (lookup) setLookup(null);
+        else if (speech.speaking) void speech.stop();
+        else if (note) setNote(null);
         else if (pending) setPending(null);
         else if (editing) { setEditing(false); setCuts(null); }
         else onBack();
@@ -440,6 +468,16 @@ export function BookView({ book, onBack, onExport }: Props) {
           </>
         ) : (
           <>
+            {speech.available && (
+              <button className="btn ghost" title={speech.speaking ? 'Stop reading aloud' : 'Read this chapter aloud'}
+                      onClick={() => void (speech.speaking
+                        ? speech.stop()
+                        : speech.start(
+                            book.blocks.slice(chapter.start, chapter.end)
+                              .map((b) => b.text).filter((t) => t.length > 1).join('. ')))}>
+                {speech.speaking ? '■ Stop' : '▶ Listen'}
+              </button>
+            )}
             <button className="btn ghost" onClick={() => setSize((v) => Math.max(13, v - 1))}>A−</button>
             <button className="btn ghost" onClick={() => setSize((v) => Math.min(26, v + 1))}>A+</button>
             <button className="btn" onClick={enterEdit} title="Edit chapter boundaries (e)">Edit split</button>
@@ -489,7 +527,8 @@ export function BookView({ book, onBack, onExport }: Props) {
         <Resizer side="left" width={widths.left} onChange={(n) => setPane('left', n)} />
 
         <div className="pane center">
-          <div className="pane-body" ref={readerRef} onMouseUp={capture}>
+          <div className="pane-body" ref={readerRef} onMouseUp={capture}
+               onDoubleClick={() => void onDoubleClick()}>
             <div className="reader" style={{ ['--reader-size' as string]: `${size}px` }}>
               <div className="reader-title">
                 <h2>{chapter.title}</h2>
@@ -533,10 +572,17 @@ export function BookView({ book, onBack, onExport }: Props) {
             <button className={tab === 'analysis' ? 'on' : ''} onClick={() => setTab('analysis')}>
               Analysis
             </button>
+            <button className={tab === 'search' ? 'on' : ''} onClick={() => setTab('search')}>
+              Find
+            </button>
           </div>
 
           {tab === 'analysis' ? (
             <Analysis dir={book.dir} chapterIndex={chapter.index} />
+          ) : tab === 'search' ? (
+            <div className="pane-body">
+              <SearchPanel blocks={book.blocks} chapters={index.chapters} onGo={goToBlock} />
+            </div>
           ) : (
             <div className="pane-body">
               {pending && (
@@ -598,9 +644,29 @@ export function BookView({ book, onBack, onExport }: Props) {
         {editing
           ? <><span><kbd>u</kbd> undo</span><span><kbd>e</kbd> leave edit</span></>
           : <><span><kbd>h</kbd> highlight</span><span><kbd>m</kbd> mark read</span><span><kbd>e</kbd> edit split</span></>}
+        <span><kbd>/</kbd> find</span>
+        <span>double-click a word to define it</span>
         <span><kbd>−</kbd><kbd>+</kbd> size</span>
         <span><kbd>Esc</kbd> back</span>
       </div>
+
+      {lookup && (
+        <div className="note-popup" role="dialog" onClick={() => setLookup(null)}>
+          <div className="note-popup-inner" onClick={(e) => e.stopPropagation()}>
+            <div className="pane-head">
+              {lookup.word}<span className="spacer" />
+              <button className="btn ghost tiny" onClick={() => setLookup(null)}>Close</button>
+            </div>
+            <div className="define">
+              {lookup.error && <p className="hint">{lookup.error}</p>}
+              {!lookup.error && !lookup.defs.length && <p className="hint">Looking up…</p>}
+              {lookup.defs.map((d, i) => (
+                <p key={i}><em>{d.partOfSpeech}</em> {d.sense}</p>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {note && (
         <div className="note-popup" role="dialog" onClick={() => setNote(null)}>

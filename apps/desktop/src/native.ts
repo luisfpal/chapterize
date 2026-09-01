@@ -23,6 +23,10 @@ export const native = {
   forgetKindlePassword: () => invoke<void>('forget_kindle_password'),
   sendToKindle: (path: string, config: KindleConfig) =>
     invoke<string>('send_to_kindle', { path, config }),
+  /** Speech via the OS, because WebKitGTK ships no Web Speech API. */
+  speak: (text: string) => invoke<void>('speak', { text }),
+  stopSpeaking: () => invoke<void>('stop_speaking'),
+  speechAvailable: () => invoke<boolean>('speech_available'),
   /** EPUBs the OS handed us — drains the queue, so each file imports once. */
   pendingFiles: () => invoke<string[]>('pending_files'),
 };

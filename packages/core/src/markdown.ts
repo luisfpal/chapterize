@@ -14,6 +14,9 @@ export function countWords(text: string): number {
  * time rather than length, because time is the thing a reader actually budgets.
  */
 export function readingMinutes(words: number, wpm = 238): number {
+  // A book split before word counts existed has no `words` field, and NaN
+  // propagates into the interface as "~NaN min" rather than failing loudly.
+  if (!Number.isFinite(words) || words <= 0) return 1;
   return Math.max(1, Math.round(words / wpm));
 }
 

@@ -299,6 +299,83 @@ fn pending_files(state: tauri::State<'_, PendingFiles>) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// The speech process currently running, so it can actually be stopped.
+///
+/// `spd-say --cancel` silences the queue but leaves a `--wait` invocation alive,
+/// which would keep "speaking" true forever. The child is tracked and killed.
+#[derive(Default)]
+struct Speech(Mutex<Option<std::process::Child>>);
+
+/// Read text aloud through the operating system.
+///
+/// WebKitGTK ships no Web Speech API, so `speechSynthesis` is simply absent and
+/// a browser-based reader is silent with no error. The platform speech services
+/// are used instead: speech-dispatcher on Linux, `say` on macOS.
+#[tauri::command]
+fn speak(text: String, state: tauri::State<'_, Speech>) -> Result<(), String> {
+    stop_speaking(state.clone())?;
+
+    // Passed as an argument, never through a shell, so book text cannot be
+    // interpreted as a command however it is punctuated.
+    #[cfg(target_os = "linux")]
+    let mut command = {
+        let mut c = std::process::Command::new("spd-say");
+        c.arg("--wait").arg("--").arg(&text);
+        c
+    };
+    #[cfg(target_os = "macos")]
+    let mut command = {
+        let mut c = std::process::Command::new("say");
+        c.arg("--").arg(&text);
+        c
+    };
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    let mut command = std::process::Command::new("cmd");
+
+    let child = command
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|e| format!(
+            "Could not start speech: {e}. On Linux install speech-dispatcher and a voice such as espeak-ng."
+        ))?;
+
+    if let Ok(mut slot) = state.0.lock() {
+        *slot = Some(child);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn stop_speaking(state: tauri::State<'_, Speech>) -> Result<(), String> {
+    // Cancel what is queued, then end the process that is waiting on it.
+    #[cfg(target_os = "linux")]
+    let _ = std::process::Command::new("spd-say")
+        .arg("--cancel")
+        .stdout(std::process::Stdio::null())
+        .status();
+
+    if let Ok(mut slot) = state.0.lock() {
+        if let Some(mut child) = slot.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn speech_available() -> bool {
+    let program = if cfg!(target_os = "macos") { "say" } else { "spd-say" };
+    std::process::Command::new("which")
+        .arg(program)
+        .stdout(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
 /// Where the Send-to-Kindle app password lives: the OS keyring, never a file.
 const KEYRING_SERVICE: &str = "dev.l11.chapterize";
 const KEYRING_USER: &str = "smtp-app-password";
@@ -415,6 +492,7 @@ pub fn run() {
             }
         }))
         .manage(PendingFiles(Mutex::new(epubs_from_args(std::env::args()))))
+        .manage(Speech::default())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init())
@@ -432,6 +510,9 @@ pub fn run() {
             has_kindle_password,
             forget_kindle_password,
             send_to_kindle,
+            speak,
+            stop_speaking,
+            speech_available,
             copy_into,
             remove_book,
             list_library,
