@@ -86,29 +86,30 @@ library/The 48 Laws of Power — Robert Greene/
 Nothing is in a database, so your notes stay readable and greppable, and they
 outlive the app. **Library folder** in the footer opens it in your file manager.
 
-### Sending a book to your Kindle
+### Kindle
 
-**Kindle** on a book sends the **whole book**, never chapters — Amazon turns one
-file into one library entry, so a split book would arrive as dozens of unrelated
-"books". Chapters exist for reading here and for feeding agents.
+Press **Connect Kindle** once. Amazon's own sign-in opens in a window belonging to
+Chapterize, and the session persists there exactly as it does in the Kindle app.
+After that, every book has one **Send to Kindle** button.
 
-Two routes:
+No SMTP host, no port, no app password, no dialog, no dragging a file. Amazon
+publishes no API for this, so the app drives its own signed-in window — which
+means an Amazon redesign can break it. It fails with a message saying so rather
+than failing quietly.
 
-- **Web uploader** — opens Amazon's page and reveals the file to drag in.
-  Nothing is stored, no password needed.
-- **E-mail** — fully automatic. Needs an *app password*, kept in your operating
-  system's keyring, never in a file. The sending address must be on Amazon's
-  *Approved Personal Document E-mail List* or Amazon discards the message
-  silently. Enable *Personal Document Archiving* and the book reaches every
-  device on your account.
+Whole books only, never chapters: Amazon turns one uploaded file into one library
+entry, so a split book would arrive as dozens of unrelated "books".
 
 ### What cannot work, and why
 
-**Books do not come back from Kindle.** Purchases are DRM-encrypted, and Amazon
-removed "Download & transfer via USB" — for personal documents the only remaining
-actions are *Mark as Read* and *Add to Collection*. So the flow is one-way:
-Chapterize → Kindle → all your devices. Nothing here can read a book out of your
-Amazon library, and no tool can, short of breaking DRM.
+**Books do not come back from Kindle.** Four supported routes were checked and all
+are closed: *Manage Your Content* offers no download for purchases or for personal
+documents, Kindle Cloud Reader excludes personal documents by Amazon's own design,
+and Kindle for PC was retired in June 2026. Anything further would mean breaking
+DRM.
+
+So Chapterize is the library and Kindle is a display. Books flow one way, and the
+app records which ones it has sent.
 
 DRM-protected books (Kindle, Kobo, Google Play) likewise cannot be opened here —
 the file is encrypted before it reaches us.

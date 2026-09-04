@@ -7,7 +7,6 @@ import { readingMinutes } from '@chapterize/core';
 import { native, type AppDirs, type BookIndex, type LoadedBook } from './native';
 import { ingest, load, resplit } from './ingest';
 import { BookView } from './Book';
-import { KindleDialog } from './Kindle';
 
 interface Shelf { dir: string; index: BookIndex }
 
@@ -19,8 +18,9 @@ export function App() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [confirming, setConfirming] = useState<string | null>(null);
-  const [kindle, setKindle] = useState<{ path: string; title: string } | null>(null);
   const [dropping, setDropping] = useState(false);
+  const [kindleReady, setKindleReady] = useState(false);
+  const [sending, setSending] = useState<string | null>(null);
   const importing = useRef(false);
 
   const refresh = useCallback(async (library: string) => {
@@ -118,6 +118,35 @@ export function App() {
     return () => { void unlisten.then((f) => f()); };
   }, [importPaths]);
 
+  useEffect(() => { void native.kindleConnected().then(setKindleReady); }, []);
+
+  /**
+   * One click, no configuration.
+   *
+   * Amazon offers no API, so the app drives its own signed-in window. The whole
+   * book goes, never chapters — Amazon turns one file into one library entry.
+   */
+  const sendToKindle = useCallback(async (dir: string, title: string) => {
+    setError(''); setNotice(''); setSending(dir);
+    try {
+      setNotice(await native.sendViaAmazon(`${dir}/book.epub`));
+      const raw = await native.readText(`${dir}/index.json`);
+      if (raw) {
+        const idx = JSON.parse(raw) as BookIndex;
+        idx.sentToKindle = new Date().toISOString();
+        await native.writeText(`${dir}/index.json`, JSON.stringify(idx, null, 2));
+      }
+      if (dirs) await refresh(dirs.library);
+      setKindleReady(true);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      setError(`${title}: ${message}`);
+      if (/sign in/i.test(message)) setKindleReady(false);
+    } finally {
+      setSending(null);
+    }
+  }, [dirs, refresh]);
+
   const openBook = useCallback(async (dir: string) => {
     setError(''); setBusy('Opening…');
     try { setOpened(await load(dir)); }
@@ -201,6 +230,10 @@ export function App() {
         <span className="sub">one chapter at a time</span>
         <span className="spacer" />
         {busy && <span className="sub">{busy}</span>}
+        <button className="btn" onClick={() => void native.openKindleWindow().then(() =>
+          window.setTimeout(() => void native.kindleConnected().then(setKindleReady), 1500))}>
+          {kindleReady ? 'Kindle ✓' : 'Connect Kindle'}
+        </button>
         <button className="btn primary" onClick={() => void pickBooks()} disabled={busy !== ''}>
           Add books…
         </button>
@@ -239,18 +272,25 @@ export function App() {
                         {index.chapters.length} chapters · {hours >= 1 ? `${hours} h` : `${minutes} min`}
                       </div>
                       <div className="bar"><span style={{ width: `${pct}%` }} /></div>
-                      <div className="stats">{index.finished.length} of {index.chapters.length} read</div>
+                      <div className="stats">
+                        {index.finished.length} of {index.chapters.length} read
+                        {index.sentToKindle && (
+                          <> · <span className="on-kindle">☁ on Kindle</span></>
+                        )}
+                      </div>
                     </button>
                     <div className="card-tools">
+                      <button className="btn ghost tiny" disabled={sending !== null}
+                              title="Put the whole book on your Kindle"
+                              onClick={() => void sendToKindle(dir, index.title)}>
+                        {sending === dir ? 'Sending…' : index.sentToKindle ? 'Re-send' : 'Send to Kindle'}
+                      </button>
                       <button className="btn ghost tiny" title="Show in file manager"
                               onClick={() => void revealItemInDir(`${dir}/index.json`)}>Reveal</button>
                       <button className="btn ghost tiny" disabled={busy !== ''}
                               title="Split this book again with the current parser"
                               onClick={() => void redoSplit(dir)}>Re-split</button>
-                      <button className="btn ghost tiny" title="Send the whole book to your Kindle"
-                              onClick={() => setKindle({ path: `${dir}/book.epub`, title: index.title })}>
-                        Kindle
-                      </button>
+
                       <button className="btn ghost tiny danger" onClick={() => setConfirming(dir)}>Remove</button>
                     </div>
                     {confirming === dir && (
@@ -283,14 +323,6 @@ export function App() {
 
       {dropping && <div className="dropzone"><span>Drop EPUB files to add them</span></div>}
 
-      {kindle && (
-        <KindleDialog
-          bookPath={kindle.path}
-          bookTitle={kindle.title}
-          onDone={(m) => setNotice(m)}
-          onClose={() => setKindle(null)}
-        />
-      )}
     </div>
   );
 }

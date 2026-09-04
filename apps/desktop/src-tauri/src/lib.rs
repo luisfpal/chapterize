@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine as _;
 use tauri::{Emitter, Manager};
 
 #[derive(Serialize)]
@@ -376,101 +378,127 @@ fn speech_available() -> bool {
         .unwrap_or(false)
 }
 
-/// Where the Send-to-Kindle app password lives: the OS keyring, never a file.
-const KEYRING_SERVICE: &str = "dev.l11.chapterize";
-const KEYRING_USER: &str = "smtp-app-password";
+/// Amazon pages the app drives, in a window it owns.
+const AMAZON_UPLOADER: &str = "https://www.amazon.com/sendtokindle";
+const KINDLE_WINDOW: &str = "kindle";
 
-#[derive(Deserialize)]
-pub struct KindleConfig {
-    /// The @kindle.com address of the device to deliver to.
-    to: String,
-    /// The sender, which must be on Amazon's Approved Personal Document list.
-    from: String,
-    /// e.g. "smtp.gmail.com".
-    host: String,
-    port: u16,
-}
-
-/// Store the app password in the OS keyring. It never touches settings or disk.
-#[tauri::command]
-fn save_kindle_password(password: String) -> Result<(), String> {
-    keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER)
-        .and_then(|e| e.set_password(&password))
-        .map_err(|e| format!("Could not save to the system keyring: {e}"))
-}
-
-#[tauri::command]
-fn has_kindle_password() -> bool {
-    keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER)
-        .and_then(|e| e.get_password())
-        .is_ok()
-}
-
-#[tauri::command]
-fn forget_kindle_password() -> Result<(), String> {
-    match keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER).and_then(|e| e.delete_credential()) {
-        Ok(()) => Ok(()),
-        Err(keyring::Error::NoEntry) => Ok(()),
-        Err(e) => Err(format!("Could not clear the keyring entry: {e}")),
-    }
-}
-
-/// Mail the whole book to a Kindle device.
+/// Is there an Amazon session in the app's own webview?
 ///
-/// Whole book only, never chapters: Amazon converts one file into one library
-/// entry, so fifty chapters would arrive as fifty unrelated "books". Chapters
-/// stay on this machine, which is what they are for.
+/// The cookie jar is the app's, persisted under its data directory, so signing in
+/// once behaves the way it does in the Kindle app rather than expiring with the
+/// window.
 #[tauri::command]
-fn send_to_kindle(path: String, config: KindleConfig) -> Result<String, String> {
-    use lettre::message::{header::ContentType, Attachment, MultiPart, SinglePart};
-    use lettre::transport::smtp::authentication::Credentials;
-    use lettre::{Message, SmtpTransport, Transport};
+async fn kindle_connected(app: tauri::AppHandle) -> bool {
+    let Ok(url) = AMAZON_UPLOADER.parse() else { return false };
+    let Some(window) = app.get_webview_window(KINDLE_WINDOW) else {
+        // No window yet: fall back to any webview's jar, which is shared.
+        return app
+            .webview_windows()
+            .values()
+            .next()
+            .and_then(|w| w.cookies_for_url(url).ok())
+            .map(|c| c.iter().any(|c| c.name() == "session-id" || c.name().starts_with("x-main")))
+            .unwrap_or(false);
+    };
+    window
+        .cookies_for_url(url)
+        .map(|c| c.iter().any(|c| c.name() == "session-id" || c.name().starts_with("x-main")))
+        .unwrap_or(false)
+}
 
+/// Open Amazon in a window belonging to the app, reusing it if already open.
+#[tauri::command]
+async fn open_kindle_window(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(existing) = app.get_webview_window(KINDLE_WINDOW) {
+        let _ = existing.show();
+        let _ = existing.set_focus();
+        return Ok(());
+    }
+    tauri::WebviewWindowBuilder::new(
+        &app,
+        KINDLE_WINDOW,
+        tauri::WebviewUrl::External(AMAZON_UPLOADER.parse().map_err(|e| format!("{e}"))?),
+    )
+    .title("Kindle — sign in to Amazon")
+    .inner_size(1000.0, 780.0)
+    .build()
+    .map(|_| ())
+    .map_err(|e| format!("Could not open the Amazon window: {e}"))
+}
+
+/// Put a whole book on the Kindle through the app's signed-in Amazon window.
+///
+/// Amazon's uploader has no file input at all — it listens for drops — so the
+/// file is handed over as a synthetic drop carrying a File built in the page.
+/// The script reports back through the document title, because Tauri does not
+/// expose its IPC to remote origins and this needs no dangerous settings.
+#[tauri::command]
+async fn send_via_amazon(app: tauri::AppHandle, path: String) -> Result<String, String> {
     let file = expand(&path);
     let bytes = fs::read(&file).map_err(|e| format!("Cannot read {}: {e}", file.display()))?;
-    // Amazon rejects personal documents above 50 MB; mail servers usually stop
-    // sooner. Fail here with a clear reason rather than after a long upload.
-    if bytes.len() > 25 * 1024 * 1024 {
-        return Err(format!(
-            "{:.1} MB is too large to e-mail. Use the web uploader instead, which accepts up to 200 MB.",
-            bytes.len() as f64 / 1_048_576.0
-        ));
+    let name = file.file_name().and_then(|n| n.to_str()).unwrap_or("book.epub").to_string();
+    if name.contains('"') || name.contains('\\') {
+        return Err(format!("Refusing to send a file with quotes in its name: {name}"));
     }
-    let name = file
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("book.epub")
-        .to_string();
+    let encoded = BASE64.encode(&bytes);
 
-    let password = keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER)
-        .and_then(|e| e.get_password())
-        .map_err(|_| "No app password saved. Add one in Kindle settings.".to_string())?;
+    open_kindle_window(app.clone()).await?;
+    let window = app
+        .get_webview_window(KINDLE_WINDOW)
+        .ok_or_else(|| "The Amazon window did not open.".to_string())?;
 
-    let attachment = Attachment::new(name.clone()).body(
-        bytes,
-        ContentType::parse("application/epub+zip").map_err(|e| e.to_string())?,
+    let script = format!(
+        r#"(async () => {{
+          const done = m => {{ document.title = m; }};
+          try {{
+            if (/\/ap\/signin/.test(location.pathname)) return done('CHZ:SIGNIN');
+            if (!/sendtokindle/.test(location.href)) {{
+              location.href = '{url}';
+              return done('CHZ:NAVIGATING');
+            }}
+            let zone = null;
+            for (let i = 0; i < 40 && !zone; i++) {{
+              zone = document.querySelector('.s2k-dnd-home-wrapper');
+              if (!zone) await new Promise(r => setTimeout(r, 250));
+            }}
+            if (!zone) return done('CHZ:ERR:Amazon changed their upload page');
+
+            const bin = atob("{data}");
+            const buf = new Uint8Array(bin.length);
+            for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+            const file = new File([buf], "{name}", {{ type: 'application/epub+zip' }});
+            const dt = new DataTransfer();
+            dt.items.add(file);
+            const opts = {{ bubbles: true, cancelable: true, dataTransfer: dt }};
+            for (const t of [zone, document.body, document]) {{
+              t.dispatchEvent(new DragEvent('dragenter', opts));
+              t.dispatchEvent(new DragEvent('dragover', opts));
+              t.dispatchEvent(new DragEvent('drop', opts));
+            }}
+            done('CHZ:SENT');
+          }} catch (e) {{ done('CHZ:ERR:' + (e && e.message ? e.message : e)); }}
+        }})();"#,
+        url = AMAZON_UPLOADER,
+        data = encoded,
+        name = name,
     );
 
-    let email = Message::builder()
-        .from(config.from.parse().map_err(|e| format!("Bad sender address: {e}"))?)
-        .to(config.to.parse().map_err(|e| format!("Bad Kindle address: {e}"))?)
-        // Amazon ignores the subject for EPUB personal documents, but a blank
-        // one makes the message look like spam to intermediate relays.
-        .subject("Convert")
-        .multipart(MultiPart::mixed().singlepart(SinglePart::plain(String::new())).singlepart(attachment))
-        .map_err(|e| format!("Could not build the message: {e}"))?;
+    window.eval(&script).map_err(|e| format!("Could not reach the Amazon window: {e}"))?;
 
-    let creds = Credentials::new(config.from.clone(), password);
-    let mailer = SmtpTransport::starttls_relay(&config.host)
-        .map_err(|e| format!("Cannot reach {}: {e}", config.host))?
-        .port(config.port)
-        .credentials(creds)
-        .build();
-
-    mailer
-        .send(&email)
-        .map(|_| format!("Sent {name} to {}", config.to))
-        .map_err(|e| format!("Send failed: {e}. Check the app password, and that the sender is on Amazon's Approved Personal Document list."))
+    // The page answers through its title; poll rather than guess at a delay.
+    for _ in 0..80 {
+        std::thread::sleep(std::time::Duration::from_millis(250));
+        let title = window.title().unwrap_or_default();
+        if let Some(rest) = title.strip_prefix("CHZ:") {
+            return match rest {
+                "SENT" => Ok(format!("{name} handed to Amazon — it appears on your devices shortly.")),
+                "SIGNIN" => Err("Sign in to Amazon in the window that just opened, then send again.".into()),
+                "NAVIGATING" => Err("Amazon was on another page; try again now that it has loaded.".into()),
+                other => Err(other.trim_start_matches("ERR:").to_string()),
+            };
+        }
+    }
+    Err("Amazon did not respond. Check the window that opened.".into())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -506,10 +534,9 @@ pub fn run() {
             write_chapters,
             ensure_analysis,
             list_analysis,
-            save_kindle_password,
-            has_kindle_password,
-            forget_kindle_password,
-            send_to_kindle,
+            kindle_connected,
+            open_kindle_window,
+            send_via_amazon,
             speak,
             stop_speaking,
             speech_available,

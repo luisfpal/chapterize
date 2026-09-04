@@ -17,35 +17,20 @@ export const native = {
   copyInto: (source: string, dir: string, name: string) => invoke<string>('copy_into', { source, dir, name }),
   removeBook: (dir: string) => invoke<void>('remove_book', { dir }),
   listLibrary: (dir: string) => invoke<string[]>('list_library', { dir }),
-  /** Send-to-Kindle: the app password lives in the OS keyring, never on disk. */
-  saveKindlePassword: (password: string) => invoke<void>('save_kindle_password', { password }),
-  hasKindlePassword: () => invoke<boolean>('has_kindle_password'),
-  forgetKindlePassword: () => invoke<void>('forget_kindle_password'),
-  sendToKindle: (path: string, config: KindleConfig) =>
-    invoke<string>('send_to_kindle', { path, config }),
   /** Speech via the OS, because WebKitGTK ships no Web Speech API. */
   speak: (text: string) => invoke<void>('speak', { text }),
   stopSpeaking: () => invoke<void>('stop_speaking'),
   speechAvailable: () => invoke<boolean>('speech_available'),
+  /** Kindle, through the app's own signed-in Amazon window. No credentials. */
+  kindleConnected: () => invoke<boolean>('kindle_connected'),
+  openKindleWindow: () => invoke<void>('open_kindle_window'),
+  sendViaAmazon: (path: string) => invoke<string>('send_via_amazon', { path }),
   /** EPUBs the OS handed us — drains the queue, so each file imports once. */
   pendingFiles: () => invoke<string[]>('pending_files'),
 };
 
 export interface AppDirs { library: string; config: string }
 export interface AnalysisFile { name: string; path: string; size: number; modified: number }
-
-/** Non-secret half of the Kindle setup; the password is in the OS keyring. */
-export interface KindleConfig { to: string; from: string; host: string; port: number }
-
-export const KINDLE_KEY = 'chapterize.kindle.v1';
-
-export function loadKindleConfig(): KindleConfig {
-  try {
-    const raw = localStorage.getItem(KINDLE_KEY);
-    if (raw) return JSON.parse(raw) as KindleConfig;
-  } catch { /* fall through to defaults */ }
-  return { to: '', from: '', host: 'smtp.gmail.com', port: 587 };
-}
 export interface OutputFile { name: string; contents: string }
 
 /** A highlight, anchored to our own block model rather than to CSS selectors. */
@@ -56,7 +41,7 @@ export interface Annotation {
   /** Character offsets within that block's text. */
   start: number;
   end: number;
-  /** The highlighted text, kept so a note survives even if the book is replaced. */
+  /** The highlighted text, kept so a note survives the book being re-split. */
   quote: string;
   note: string;
   color: 1 | 2 | 3 | 4;
@@ -75,6 +60,8 @@ export interface BookIndex {
   progress: Record<string, number>;
   /** Chapter last opened, so the book reopens where it was left. */
   lastChapter?: number;
+  /** When this book was last handed to Amazon, so the library can show it. */
+  sentToKindle?: string;
   finished: number[];
 }
 
