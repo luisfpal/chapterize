@@ -5,7 +5,7 @@ import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { listen } from '@tauri-apps/api/event';
 import { readingMinutes } from '@chapterize/core';
 import { native, type AppDirs, type BookIndex, type LoadedBook } from './native';
-import { ingest, load, resplit } from './ingest';
+import { ingest, load } from './ingest';
 import { BookView } from './Book';
 
 interface Shelf { dir: string; index: BookIndex }
@@ -17,10 +17,11 @@ export function App() {
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
-  const [confirming, setConfirming] = useState<string | null>(null);
   const [dropping, setDropping] = useState(false);
   const [kindleReady, setKindleReady] = useState(false);
   const [sending, setSending] = useState<string | null>(null);
+  const [menu, setMenu] = useState<string | null>(null);
+  const [undo, setUndo] = useState<{ trashed: string; title: string } | null>(null);
   const importing = useRef(false);
 
   const refresh = useCallback(async (library: string) => {
@@ -154,35 +155,37 @@ export function App() {
     finally { setBusy(''); }
   }, []);
 
-  /** Re-run the splitter over a book already in the library. */
-  const redoSplit = useCallback(async (dir: string) => {
+  /**
+   * Remove a book, reversibly.
+   *
+   * A book folder holds highlights and whatever an agent wrote in analysis/,
+   * none of which can be rebuilt from the EPUB. So it moves aside rather than
+   * being deleted, and the interface offers Undo instead of a confirmation —
+   * a confirm button appearing under the cursor is how an accidental second
+   * click destroys something.
+   */
+  const removeBook = useCallback(async (dir: string, title: string) => {
     if (!dirs) return;
-    setError(''); setNotice(''); setBusy('Re-splitting…');
+    setMenu(null); setError('');
     try {
-      const result = await resplit(dir, dirs.library);
+      const trashed = await native.removeBook(dir);
       await refresh(dirs.library);
-      setNotice(
-        `${result.index.title}: ${result.index.chapters.length} chapters.` +
-        (result.orphaned ? ` ${result.orphaned} highlight(s) no longer match any text and were dropped.` : ''),
-      );
+      setUndo({ trashed, title });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy('');
     }
   }, [dirs, refresh]);
 
-  const deleteBook = useCallback(async (dir: string) => {
-    if (!dirs) return;
-    setConfirming(null);
+  const undoRemove = useCallback(async () => {
+    if (!undo || !dirs) return;
     try {
-      await native.removeBook(dir);
+      await native.restoreBook(undo.trashed, dirs.library);
       await refresh(dirs.library);
-      setNotice('Book removed. The file you imported from was not touched.');
+      setUndo(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
-  }, [dirs, refresh]);
+  }, [dirs, refresh, undo]);
 
   /** Chapter Markdown plus your highlights, written wherever you choose. */
   const doExport = useCallback(async (which: number | 'all') => {
@@ -242,6 +245,14 @@ export function App() {
       <div className="library">
         {error && <div className="banner error">{error}</div>}
         {notice && <div className="banner">{notice}</div>}
+        {undo && (
+          <div className="banner">
+            Removed <strong>{undo.title}</strong>. Nothing was deleted — your
+            highlights and analysis moved aside with it.
+            <span className="spacer" />
+            <button className="btn tiny" onClick={() => void undoRemove()}>Undo</button>
+          </div>
+        )}
 
         {shelf.length === 0 ? (
           <div className="welcome">
@@ -285,21 +296,21 @@ export function App() {
                               onClick={() => void sendToKindle(dir, index.title)}>
                         {sending === dir ? 'Sending…' : index.sentToKindle ? 'Re-send' : 'Send to Kindle'}
                       </button>
-                      <button className="btn ghost tiny" title="Show in file manager"
-                              onClick={() => void revealItemInDir(`${dir}/index.json`)}>Reveal</button>
-                      <button className="btn ghost tiny" disabled={busy !== ''}
-                              title="Split this book again with the current parser"
-                              onClick={() => void redoSplit(dir)}>Re-split</button>
+                      <span className="spacer" />
+                      <button className="btn ghost tiny" title="More"
+                              onClick={() => setMenu(menu === dir ? null : dir)}>⋯</button>
 
-                      <button className="btn ghost tiny danger" onClick={() => setConfirming(dir)}>Remove</button>
+
+
                     </div>
-                    {confirming === dir && (
-                      <div className="confirm">
-                        <span>Remove this book and its chapters?</span>
-                        <div className="row">
-                          <button className="btn" onClick={() => setConfirming(null)}>Cancel</button>
-                          <button className="btn danger" onClick={() => void deleteBook(dir)}>Remove</button>
-                        </div>
+                    {menu === dir && (
+                      <div className="card-menu" onMouseLeave={() => setMenu(null)}>
+                        <button onClick={() => { setMenu(null); void revealItemInDir(`${dir}/index.json`); }}>
+                          Show in file manager
+                        </button>
+                        <button className="danger" onClick={() => void removeBook(dir, index.title)}>
+                          Remove from library
+                        </button>
                       </div>
                     )}
                   </div>

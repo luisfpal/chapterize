@@ -1,6 +1,6 @@
 import {
   openEpub, detect, toChapters, deriveTitles, renderChapter, chapterFilename,
-  mergeStubs, imageFilename, countWords, readingMinutes, EpubError,
+  mergeStubs, imageFilename, countWords, readingMinutes, PARSER_VERSION, EpubError,
 } from '@chapterize/core';
 import type { CutPoint } from '@chapterize/core';
 import {
@@ -96,6 +96,7 @@ export async function ingest(
 
   const index: BookIndex = {
     version: 2,
+    parserVersion: PARSER_VERSION,
     title: book.metadata.title,
     ...(book.metadata.author !== undefined ? { author: book.metadata.author } : {}),
     epubFile: 'book.epub',
@@ -123,10 +124,19 @@ export async function ingest(
 export async function load(dir: string) {
   const indexText = await native.readText(`${dir}/index.json`);
   if (!indexText) throw new Error(`No index.json in ${dir}`);
-  const index = JSON.parse(indexText) as BookIndex;
+  let index = JSON.parse(indexText) as BookIndex;
 
   const bytes = bytesOf(await native.readFile(`${dir}/${index.epubFile}`));
   const book = openEpub(bytes);
+
+  // The parser has changed since this book was split, so its chapters are stale.
+  // Rebuild them now rather than putting a "Re-split" button in front of someone
+  // who only wants to read.
+  if (index.parserVersion !== PARSER_VERSION) {
+    await resplit(dir, dir.slice(0, dir.lastIndexOf('/')));
+    const refreshed = await native.readText(`${dir}/index.json`);
+    if (refreshed) index = JSON.parse(refreshed) as BookIndex;
+  }
 
   // Libraries split before word counts existed carry no `words`, which the
   // reader would render as "~NaN min". Fill them in once, from the blocks we
@@ -234,7 +244,10 @@ export async function saveSplit(
   // Progress and finished flags are chapter-indexed, and the indices just moved.
   // Keeping them would mark the wrong chapters read, so they are dropped rather
   // than silently misapplied.
-  const next: BookIndex = { ...book.index, version: 2, chapters: stored, progress: {}, finished: [] };
+  const next: BookIndex = {
+    ...book.index, version: 2, parserVersion: PARSER_VERSION,
+    chapters: stored, progress: {}, finished: [],
+  };
   delete next.lastChapter;
   await native.writeText(`${book.dir}/index.json`, JSON.stringify(next, null, 2));
   return next;

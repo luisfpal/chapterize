@@ -275,11 +275,9 @@ kbd {
 }
 .bar { height: 3px; border-radius: 2px; background: var(--bg-active); margin: 10px 0 7px; }
 .bar span { display: block; height: 100%; border-radius: 2px; background: var(--accent); }
-.confirm {
-  position: absolute; inset: 0; background: var(--bg-raised);
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 12px; padding: 16px; text-align: center; font-size: 12.5px;
-}
+/* The confirm overlay is gone: it covered the card and put a destructive button
+   directly under the cursor, so a second click in the same place deleted a book.
+   Removal is immediate and undoable instead. */
 .banner.error { background: var(--accent-soft); color: var(--accent); white-space: pre-wrap; }
 
 /* ── drag and drop ─────────────────────────────────────────────────── */
@@ -463,3 +461,17 @@ sup.noteref:hover { background: var(--accent-soft); }
 
 /* ── kindle state ──────────────────────────────────────────────────── */
 .on-kindle { color: var(--accent); }
+
+/* ── card overflow menu ────────────────────────────────────────────── */
+.card-menu {
+  position: absolute; right: 10px; bottom: 40px; z-index: 5;
+  background: var(--bg-raised); border: 1px solid var(--border-strong);
+  border-radius: var(--r-md); box-shadow: var(--shadow); overflow: hidden;
+  display: flex; flex-direction: column; min-width: 170px;
+}
+.card-menu button {
+  background: none; border: 0; text-align: left;
+  padding: 8px 12px; font-size: 12.5px; color: var(--text);
+}
+.card-menu button:hover { background: var(--bg-hover); }
+.card-menu button.danger { color: #c8543f; }

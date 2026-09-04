@@ -15,7 +15,10 @@ export const native = {
   /** Markdown the user or their agents put in `analysis/`, newest first. */
   listAnalysis: (dir: string) => invoke<AnalysisFile[]>('list_analysis', { dir }),
   copyInto: (source: string, dir: string, name: string) => invoke<string>('copy_into', { source, dir, name }),
-  removeBook: (dir: string) => invoke<void>('remove_book', { dir }),
+  /** Moves the book aside and returns where; nothing is destroyed. */
+  removeBook: (dir: string) => invoke<string>('remove_book', { dir }),
+  restoreBook: (trashed: string, library: string) =>
+    invoke<void>('restore_book', { trashed, library }),
   listLibrary: (dir: string) => invoke<string[]>('list_library', { dir }),
   /** Speech via the OS, because WebKitGTK ships no Web Speech API. */
   speak: (text: string) => invoke<void>('speak', { text }),
@@ -62,6 +65,8 @@ export interface BookIndex {
   lastChapter?: number;
   /** When this book was last handed to Amazon, so the library can show it. */
   sentToKindle?: string;
+  /** Parser that produced these chapters; a mismatch triggers a silent re-split. */
+  parserVersion?: number;
   finished: number[];
 }
 

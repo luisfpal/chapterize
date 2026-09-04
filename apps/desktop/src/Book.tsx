@@ -203,6 +203,7 @@ export function BookView({ book, onBack, onExport }: Props) {
   const [widths, setWidths] = useState(loadWidths);
   const [tab, setTab] = useState<'notes' | 'analysis' | 'search'>('notes');
   const [lookup, setLookup] = useState<{ word: string; defs: Definition[]; error: string } | null>(null);
+  const [exporting, setExporting] = useState(false);
   const [editing, setEditing] = useState(false);
   const [cuts, setCuts] = useState<CutPoint[] | null>(null);
   const [history, setHistory] = useState<CutPoint[][]>([]);
@@ -481,8 +482,7 @@ export function BookView({ book, onBack, onExport }: Props) {
             <button className="btn ghost" onClick={() => setSize((v) => Math.max(13, v - 1))}>A−</button>
             <button className="btn ghost" onClick={() => setSize((v) => Math.min(26, v + 1))}>A+</button>
             <button className="btn" onClick={enterEdit} title="Edit chapter boundaries (e)">Edit split</button>
-            <button className="btn" onClick={() => onExport(current)}>Export chapter</button>
-            <button className="btn primary" onClick={() => onExport('all')}>Export all</button>
+            <button className="btn primary" onClick={() => setExporting(true)}>Export…</button>
           </>
         )}
       </div>
@@ -619,23 +619,16 @@ export function BookView({ book, onBack, onExport }: Props) {
       </div>
 
       <div className="pathbar">
-        <span className="label">Paths for agents</span>
-        <button className="btn ghost tiny" onClick={() => void copy(`${book.dir}/chapters/${chapter.file}`, 'this chapter’s path')}>
-          this chapter
+        <span className="label">For your agents</span>
+        <button className="btn tiny" title="Puts the book, chapter, and both folder paths on the clipboard"
+                onClick={() => void copy(agentPrompt(), 'a ready prompt')}>
+          Copy for agent
         </button>
-        <button className="btn ghost tiny" onClick={() => void copy(`${book.dir}/chapters`, 'chapters/ path')}>
-          chapters/
-        </button>
-        <button className="btn ghost tiny" onClick={() => void copy(`${book.dir}/analysis`, 'analysis/ path')}>
-          analysis/
-        </button>
-        <button className="btn tiny" onClick={() => void copy(agentPrompt(), 'a ready prompt')}>
-          Copy prompt for agent
-        </button>
-        <span className="spacer" />
         <button className="btn ghost tiny" onClick={() => void revealItemInDir(`${book.dir}/index.json`)}>
           Open folder
         </button>
+        <span className="spacer" />
+        {flash && <span className="sub flash">{flash}</span>}
       </div>
 
       <div className="keys">
@@ -649,6 +642,27 @@ export function BookView({ book, onBack, onExport }: Props) {
         <span><kbd>−</kbd><kbd>+</kbd> size</span>
         <span><kbd>Esc</kbd> back</span>
       </div>
+
+      {exporting && (
+        <div className="note-popup" role="dialog" onClick={() => setExporting(false)}>
+          <div className="note-popup-inner" onClick={(e) => e.stopPropagation()}>
+            <div className="pane-head">Export as Markdown<span className="spacer" />
+              <button className="btn ghost tiny" onClick={() => setExporting(false)}>Close</button>
+            </div>
+            <div className="define">
+              <p className="hint">Writes files to a folder you choose, with your highlights appended.</p>
+              <div className="row">
+                <button className="btn" onClick={() => { setExporting(false); onExport(current); }}>
+                  This chapter
+                </button>
+                <button className="btn primary" onClick={() => { setExporting(false); onExport('all'); }}>
+                  All {index.chapters.length} chapters
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {lookup && (
         <div className="note-popup" role="dialog" onClick={() => setLookup(null)}>

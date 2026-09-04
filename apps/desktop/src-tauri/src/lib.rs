@@ -248,15 +248,67 @@ fn copy_into(source: String, dir: String, name: String) -> Result<String, String
     Ok(target.to_string_lossy().into_owned())
 }
 
-/// Delete one book folder. Refuses anything that is not a book, so a mistyped
-/// path cannot take a directory tree with it.
+/// Take a book out of the library without destroying it.
+///
+/// It moves to `.trash/` rather than being deleted. A book folder holds
+/// `annotations.json` and `analysis/` — highlights the user wrote and work their
+/// agents produced, none of which can be regenerated from the EPUB. Offering an
+/// irreversible delete for that behind a single confirmation was a mistake; the
+/// interface now removes immediately and offers Undo, which only works because
+/// nothing is actually gone.
 #[tauri::command]
-fn remove_book(dir: String) -> Result<(), String> {
+fn remove_book(dir: String) -> Result<String, String> {
     let dir = expand(&dir);
     if !dir.join("index.json").exists() {
-        return Err(format!("{} is not a Chapterize book; refusing to delete it.", dir.display()));
+        return Err(format!("{} is not a Chapterize book; refusing to touch it.", dir.display()));
     }
-    fs::remove_dir_all(&dir).map_err(|e| format!("Cannot delete {}: {e}", dir.display()))
+    let library = dir
+        .parent()
+        .ok_or_else(|| "That book has no library folder.".to_string())?;
+    let name = dir.file_name().and_then(|n| n.to_str()).unwrap_or("book");
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    let trash = library.join(".trash");
+    fs::create_dir_all(&trash).map_err(|e| format!("Cannot create {}: {e}", trash.display()))?;
+    let target = trash.join(format!("{name}-{stamp}"));
+
+    if fs::rename(&dir, &target).is_err() {
+        copy_tree(&dir, &target)?;
+        fs::remove_dir_all(&dir).map_err(|e| format!("Copied aside but could not clear the original: {e}"))?;
+    }
+    Ok(target.to_string_lossy().into_owned())
+}
+
+/// Put a book back where it came from.
+#[tauri::command]
+fn restore_book(trashed: String, library: String) -> Result<(), String> {
+    let trashed = expand(&trashed);
+    let name = trashed
+        .file_name()
+        .and_then(|n| n.to_str())
+        .and_then(|n| n.rsplit_once('-').map(|(head, _)| head.to_string()))
+        .ok_or_else(|| "That is not something this removed.".to_string())?;
+    let target = expand(&library).join(name);
+    fs::rename(&trashed, &target).map_err(|e| format!("Could not put it back: {e}"))
+}
+
+/// Recursive copy, for when the trash lands on another filesystem.
+fn copy_tree(from: &Path, to: &Path) -> Result<(), String> {
+    fs::create_dir_all(to).map_err(|e| format!("Cannot create {}: {e}", to.display()))?;
+    for entry in fs::read_dir(from).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let src = entry.path();
+        let dst = to.join(entry.file_name());
+        if src.is_dir() {
+            copy_tree(&src, &dst)?;
+        } else {
+            fs::copy(&src, &dst).map_err(|e| format!("Cannot copy {}: {e}", src.display()))?;
+        }
+    }
+    Ok(())
 }
 
 /// Sub-directories of the library that hold a parsed book.
@@ -269,6 +321,9 @@ fn list_library(dir: String) -> Result<Vec<String>, String> {
     let mut out = Vec::new();
     for entry in fs::read_dir(&dir).map_err(|e| e.to_string())? {
         let path = entry.map_err(|e| e.to_string())?.path();
+        if path.file_name().and_then(|n| n.to_str()) == Some(".trash") {
+            continue;
+        }
         if path.is_dir() && path.join("index.json").exists() {
             out.push(path.to_string_lossy().into_owned());
         }
@@ -542,6 +597,7 @@ pub fn run() {
             speech_available,
             copy_into,
             remove_book,
+            restore_book,
             list_library,
             pending_files,
         ])
@@ -649,6 +705,28 @@ mod tests {
 
         assert_eq!(fs::read_to_string(&readme).unwrap(), "user edited this");
         fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Removing a book must not destroy the one thing that cannot be rebuilt.
+    #[test]
+    fn removing_a_book_keeps_annotations_and_analysis() {
+        let lib = std::env::temp_dir().join(format!("chapterize-rm-{}", std::process::id()));
+        let book = lib.join("Some Book");
+        fs::create_dir_all(book.join("analysis")).unwrap();
+        fs::write(book.join("index.json"), b"{}").unwrap();
+        fs::write(book.join("annotations.json"), b"[{\"quote\":\"mine\"}]").unwrap();
+        fs::write(book.join("analysis").join("summary.md"), b"an agent wrote this").unwrap();
+
+        let moved = remove_book(book.to_string_lossy().into_owned()).unwrap();
+
+        assert!(!book.exists(), "it leaves the library");
+        let moved = std::path::PathBuf::from(&moved);
+        assert_eq!(fs::read_to_string(moved.join("annotations.json")).unwrap(), "[{\"quote\":\"mine\"}]");
+        assert_eq!(fs::read_to_string(moved.join("analysis").join("summary.md")).unwrap(), "an agent wrote this");
+
+        restore_book(moved.to_string_lossy().into_owned(), lib.to_string_lossy().into_owned()).unwrap();
+        assert!(book.join("analysis").join("summary.md").exists(), "and it comes back");
+        fs::remove_dir_all(&lib).ok();
     }
 
     #[test]
