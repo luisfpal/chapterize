@@ -1,0 +1,25 @@
+{
+  "name": "@chapterize/cli",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "bin": {
+    "chapterize": "./bin.js"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@chapterize/core": "*",
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/qrcode": "^1.5.5",
+    "fflate": "^0.8.2",
+    "happy-dom": "^17.4.4",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

@@ -15,4 +15,7 @@ test/fixtures/
 # Working notes and plans — local to the maintainer, not part of the project.
 internal_docs/
 
+# Phone sites the CLI writes. A book does not belong in the repository.
+chapterize-reader/
+
 apps/desktop/src-tauri/target/

@@ -1,0 +1,487 @@
+/* The phone is the book. Type is a serif iOS already ships (Iowan Old Style);
+   everything that is chrome, not prose, is the system sans. No webfont: the
+   page has to open on a Wi-Fi that is not the internet. */
+
+:root {
+  --bg: #fbf8f3;
+  --ink: #1c1915;
+  --muted: #6f685f;
+  --rule: #e3dcd1;
+  --chip: #efeae2;
+  --chip-on: #fffdf9;
+  --raise: #f4efe7;
+  --accent: #1c1915;
+  --accent-ink: #fbf8f3;
+  --warn: #8c3d32;
+  --select: #e6d3b3;
+  --scale: 1;
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  --bg: #141311;
+  --ink: #e7e1d6;
+  --muted: #a39b90;
+  --rule: #2e2b27;
+  --chip: #2a2724;
+  --chip-on: #3a3632;
+  --raise: #1c1b18;
+  --accent: #e7e1d6;
+  --accent-ink: #141311;
+  --warn: #e3a99c;
+  --select: #4a3f32;
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #141311;
+    --ink: #e7e1d6;
+    --muted: #a39b90;
+    --rule: #2e2b27;
+    --chip: #2a2724;
+    --chip-on: #3a3632;
+    --raise: #1c1b18;
+    --accent: #e7e1d6;
+    --accent-ink: #141311;
+    --warn: #e3a99c;
+    --select: #4a3f32;
+    color-scheme: dark;
+  }
+}
+
+* { box-sizing: border-box; }
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+  font-size: 1.125rem;
+  line-height: 1.5;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: var(--select);
+  color: var(--ink);
+}
+
+button {
+  font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+  font-size: 0.95rem;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+
+button:focus-visible,
+textarea:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
+header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-height: 52px;
+  padding: calc(0.2rem + env(safe-area-inset-top)) 0.7rem 0.2rem;
+  background: var(--bg);
+  border-bottom: 1px solid var(--rule);
+}
+
+header button {
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 0.35rem;
+  font-size: 0.92rem;
+}
+
+.running {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 0.98rem;
+}
+
+.page {
+  max-width: 36rem;
+  margin: 0 auto;
+  padding: 1.4rem 1.35rem calc(2.2rem + env(safe-area-inset-bottom));
+}
+
+.book-title {
+  font-size: calc(2rem * var(--scale));
+  line-height: 1.12;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  margin: 0.2rem 0 0.35rem;
+}
+
+.byline {
+  margin: 0 0 1.4rem;
+  color: var(--muted);
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.95rem;
+}
+
+.continue {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-radius: 16px;
+  padding: 1rem 1.1rem 1.05rem;
+  margin-bottom: 1.6rem;
+}
+
+.continue .eyebrow,
+.kicker,
+.label {
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.68rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+.continue .eyebrow { opacity: 0.72; }
+
+.continue .name {
+  display: block;
+  margin-top: 0.28rem;
+  font-family: "Iowan Old Style", Palatino, Georgia, serif;
+  font-size: calc(1.35rem * var(--scale));
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.continue .meta {
+  display: block;
+  margin-top: 0.3rem;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.85rem;
+  opacity: 0.75;
+}
+
+.section-label {
+  margin: 0 0 0.4rem;
+  color: var(--muted);
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.72rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+.contents {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.contents button {
+  display: flex;
+  width: 100%;
+  text-align: left;
+  gap: 0.75rem;
+  align-items: baseline;
+  min-height: 48px;
+  padding: 0.7rem 0;
+  border-top: 1px solid var(--rule);
+  font-family: "Iowan Old Style", Palatino, Georgia, serif;
+  font-size: 1.05rem;
+}
+
+.contents li:last-child button { border-bottom: 1px solid var(--rule); }
+
+.contents .num {
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.78rem;
+  color: var(--muted);
+  min-width: 1.4rem;
+}
+
+.contents .ctitle { flex: 1; }
+
+.contents .cmeta {
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.75rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.install {
+  margin-top: 1.6rem;
+  padding: 0.85rem 0.95rem;
+  background: var(--raise);
+  border-radius: 12px;
+  color: var(--muted);
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.install button {
+  display: block;
+  margin-top: 0.45rem;
+  min-height: 44px;
+  color: var(--ink);
+  font-size: 0.9rem;
+}
+
+.kicker {
+  color: var(--muted);
+  margin: 0 0 0.45rem;
+}
+
+.chapter-title {
+  font-size: calc(1.9rem * var(--scale));
+  line-height: 1.15;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  margin: 0 0 1rem;
+}
+
+.segment {
+  display: flex;
+  padding: 3px;
+  margin: 0 0 1.3rem;
+  background: var(--chip);
+  border-radius: 999px;
+}
+
+.segment button {
+  flex: 1;
+  min-height: 36px;
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.segment button[aria-selected="true"] {
+  background: var(--chip-on);
+  color: var(--ink);
+}
+
+.lede {
+  margin: 0 0 1.2rem;
+  color: var(--muted);
+  font-size: 1.02rem;
+}
+
+article {
+  font-size: calc(1.125rem * var(--scale));
+  line-height: 1.5;
+}
+
+article p,
+article li,
+article blockquote {
+  margin: 0 0 0.85em;
+  hyphens: auto;
+  -webkit-hyphens: auto;
+}
+
+article p { text-align: justify; }
+
+article h1, article h2, article h3, article h4, article h5, article h6 {
+  text-align: left;
+  line-height: 1.2;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  margin: 1.5em 0 0.45em;
+  hyphens: manual;
+}
+
+article h1 { font-size: 1.45em; }
+article h2 { font-size: 1.22em; }
+article h3 { font-size: 1.08em; }
+
+article blockquote {
+  margin-left: 0;
+  padding-left: 0.9rem;
+  border-left: 2px solid var(--rule);
+  color: var(--ink);
+  font-style: italic;
+}
+
+article pre {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.82em;
+  white-space: pre-wrap;
+  background: var(--raise);
+  padding: 0.8rem;
+  border-radius: 10px;
+  text-align: left;
+}
+
+article img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  margin: 0.4rem auto;
+}
+
+article figure { margin: 1rem 0; }
+
+article ul, article ol { padding-left: 1.2rem; }
+
+article .notes {
+  margin-top: 2rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--rule);
+  font-size: 0.92rem;
+  color: var(--muted);
+}
+
+article .notes h2 {
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.72rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+article sup a { text-decoration: none; }
+
+.study h2 {
+  font-size: 1.25rem;
+  margin: 1.4rem 0 0.3rem;
+  letter-spacing: -0.015em;
+}
+
+.hint {
+  margin: 0 0 0.8rem;
+  color: var(--muted);
+  font-size: 0.98rem;
+}
+
+.outline {
+  list-style: none;
+  margin: 0 0 0.4rem;
+  padding: 0;
+}
+
+.outline li {
+  padding: 0.5rem 0;
+  border-top: 1px solid var(--rule);
+  font-size: calc(1.05rem * var(--scale));
+}
+
+.outline li.lv3 { padding-left: 0.85rem; }
+.outline li.lv4,
+.outline li.lv5,
+.outline li.lv6 { padding-left: 1.5rem; }
+
+textarea {
+  display: block;
+  width: 100%;
+  margin: 0.3rem 0 0.55rem;
+  padding: 0.75rem 0.8rem;
+  min-height: 5.6rem;
+  resize: vertical;
+  border-radius: 12px;
+  border: 1px solid var(--rule);
+  background: var(--raise);
+  color: var(--ink);
+  font-family: "Iowan Old Style", Palatino, Georgia, serif;
+  font-size: max(16px, calc(1.05rem * var(--scale)));
+  line-height: 1.45;
+}
+
+.row {
+  display: flex;
+  gap: 0.6rem;
+  align-items: stretch;
+}
+
+.primary, .quiet {
+  min-height: 44px;
+  padding: 0 0.9rem;
+  border-radius: 12px;
+  font-size: 0.95rem;
+}
+
+.primary {
+  flex: 1;
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.quiet {
+  border: 1px solid var(--rule);
+  color: var(--ink);
+}
+
+.notice {
+  color: var(--warn);
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.9rem;
+  margin: 0.4rem 0 0.2rem;
+}
+
+.passage {
+  margin: 0.9rem 0 1.1rem;
+  padding: 0.15rem 0 0.15rem 0.9rem;
+  border-left: 2px solid var(--ink);
+}
+
+.passage p {
+  margin: 0.35rem 0 0;
+  font-size: calc(1.05rem * var(--scale));
+  line-height: 1.45;
+}
+
+.yours {
+  margin: 0.7rem 0 0;
+  color: var(--muted);
+  font-size: 0.98rem;
+}
+
+.locked {
+  margin: 0.8rem 0;
+  color: var(--muted);
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.9rem;
+}
+
+.pager {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 2.2rem;
+}
+
+.pager button {
+  min-height: 44px;
+  font-size: 1rem;
+  font-family: "Iowan Old Style", Palatino, Georgia, serif;
+}
+
+.pager button:disabled { color: var(--muted); }
+
+.study-link {
+  display: block;
+  width: 100%;
+  margin-top: 1.8rem;
+  min-height: 48px;
+  border-radius: 14px;
+  border: 1px solid var(--rule);
+  font-size: 1rem;
+}

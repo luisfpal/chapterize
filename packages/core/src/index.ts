@@ -19,3 +19,11 @@ export {
   slugify, chapterFilename, imageFilename, inlineMarkdown,
   type RenderOptions,
 } from './markdown.js';
+export {
+  buildStudy, slicePassage, MAX_STUDY_STEPS,
+  type OutlineItem, type StudyStep, type ChapterStudy,
+} from './study.js';
+export {
+  prepareReader, renderChapterHtml, safeInline, escapeHtml, assignImageNames, readerId,
+  type ReaderModel, type ReaderChapter, type ReaderImage,
+} from './reader.js';

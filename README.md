@@ -10,6 +10,32 @@ about one chapter gets you an answer contaminated by the other fifty. One law is
 
 Everything runs locally. Books never leave the machine.
 
+## On your phone
+
+The computer is the dock. Reading happens on the phone.
+
+```bash
+npx chapterize book.epub
+```
+
+Needs Node 22.18 or newer. The terminal prints a QR code. Scan it, then on iPhone choose **Share → Add to Home Screen**. The type is a serif the phone already has (nothing is downloaded), daylight is warm paper, and night is warm dark. The chapter and the scroll position are still there the next time that phone opens the book.
+
+Each chapter has a study panel. The outline is the author's own sections. "Why this matters" is a sentence you write; the chapter's opening is then quoted, not summarised. Questions open in order. A blank answer does not reveal the passage, and the next question stays locked until this one is answered or marked "I don't know yet". The passage is the author's paragraph. There is no model in this path, and nothing is sent anywhere.
+
+**Paper** hides the chapter text. The section list and the same locked questions stay, for use beside a physical book.
+
+The files land in `./chapterize-reader/<title>/` (gitignored). `--no-serve` writes them and exits. `--host 127.0.0.1` stays off Wi-Fi. The default port is 4737.
+
+Limits, on purpose:
+
+- The link is a long random token, not a login. Anyone on the same Wi-Fi who has it can read the book while the command is running. The terminal says so.
+- The same book keeps the same link, so the Home Screen icon still opens the next time you run the command. It stops working if the computer's address changes, or if port 4737 is taken and the command moves.
+- After the first load the phone can open the saved copy with the computer asleep. iOS may delete a site that has not been opened. The first load, and any new copy of the book, need the computer serving and the phone on that Wi-Fi.
+- Sentences you write stay in that phone's local storage. They are not copied back. Clearing the site data loses them. Rebuilding the same chapter list keeps the place; a changed chapter list is a different book and starts over.
+- A chapter asks at most five questions. A chapter with no headings gets landmarks (opening, middle, end), labelled as such. Questions are templates. The program does not understand the book.
+- DRM is unchanged. An encrypted store file still will not open.
+- A directory that is not empty, and not one this command created, is refused. Nothing of yours is deleted to make room.
+
 ---
 
 ## Install

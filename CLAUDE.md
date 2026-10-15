@@ -92,6 +92,12 @@ to need one, the block model is wrong and that is the thing to fix.
 - Ship the full `hicolor` icon size range. GNOME picks different sizes for the
   dock, the grid, and the window list, and a missing size renders blurry.
 
+## The phone reader
+
+The daily surface is `packages/cli`. `chapterize book.epub` writes a static site and serves it on the LAN under a token kept in that site's `chapterize.json`, so the Home Screen icon survives the next run. The study ritual lives in `packages/cli/src/reader.js` and must not skip a step: a blank answer does not reveal a passage, and the next question stays locked until this one is faced. There is no model and no network call in that path. Do not add one. Passages are verbatim prefixes of the author's paragraphs (`packages/core/src/study.ts`), not summaries.
+
+`packages/core` stays free of `node:fs` and of the DOM. The desktop bundle imports the core barrel; the site writer and the server stay in the CLI so they are not pulled into that bundle.
+
 ## Verifying on this machine — hard-won
 
 - **`import`/`xwd` cannot capture a WebKitGTK window.** They return a single
