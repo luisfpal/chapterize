@@ -1,6 +1,7 @@
 import {
   openEpub, detect, toChapters, deriveTitles, renderChapter, chapterFilename,
   mergeStubs, imageFilename, countWords, readingMinutes, PARSER_VERSION, EpubError,
+  explainUnresolved,
 } from '@chapterize/core';
 import type { CutPoint } from '@chapterize/core';
 import {
@@ -48,12 +49,14 @@ export async function ingest(
 
   const warnings: string[] = [];
   if (detection.unresolved.length) {
+    // An image-only cover is in the spine and has no text. That is normal, and
+    // warning about it taught people to distrust a message that sometimes meant
+    // "this contents entry points outside the book".
     const real = detection.unresolved.filter((u) => u.reason !== 'document-has-no-text');
     if (real.length) {
-      warnings.push(
-        `${real.length} table-of-contents ${real.length === 1 ? 'entry' : 'entries'} could not be located; ` +
-        'those chapters start at the top of their file.',
-      );
+      const shown = real.slice(0, 3).map((item) => explainUnresolved(item));
+      const extra = real.length > 3 ? ` ${real.length - 3} more contents entries also failed.` : '';
+      warnings.push(`${shown.join(' ')}${extra}`);
     }
   }
   if (detection.strategy !== 'toc') {

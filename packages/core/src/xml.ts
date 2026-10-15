@@ -63,17 +63,32 @@ export function attr(node: Element, name: string): string | undefined {
   return undefined;
 }
 
-/** Concatenated descendant text, whitespace-collapsed. */
-export function textOf(node: AnyNode): string {
+/**
+ * Concatenated descendant text, whitespace-collapsed.
+ *
+ * `<br>` is a space. Converted books use it as a line break inside a paragraph,
+ * and dropping it glues the two words into one (`hithere`), which then fails
+ * every search and every quote re-anchor.
+ */
+export function textOf(node: AnyNode | AnyNode[]): string {
   let out = '';
   const walk = (n: AnyNode): void => {
-    if (n.type === 'text') out += (n as unknown as { data: string }).data;
-    else if ('children' in n && n.children) {
-      if (isElement(n) && (n.name === 'script' || n.name === 'style')) return;
-      for (const c of n.children as AnyNode[]) walk(c);
+    if (n.type === 'text') {
+      out += (n as unknown as { data: string }).data;
+      return;
     }
+    if (!('children' in n) || !n.children) return;
+    if (isElement(n)) {
+      const tag = n.name.toLowerCase();
+      if (tag === 'script' || tag === 'style') return;
+      if (tag === 'br' || tag === 'hr') {
+        out += ' ';
+        return;
+      }
+    }
+    for (const c of n.children as AnyNode[]) walk(c);
   };
-  walk(node);
+  for (const n of Array.isArray(node) ? node : [node]) walk(n);
   return collapse(out);
 }
 

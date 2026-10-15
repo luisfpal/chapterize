@@ -83,13 +83,18 @@ export function detectFromToc(book: Book): Detection {
   return { cuts: normalise(cuts, 'toc'), strategy: 'toc', unresolved };
 }
 
+function titleKey(s: string): string {
+  return s.toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
 /**
  * Headings fallback, for books with no usable TOC.
  *
- * Picks the shallowest heading level that yields a sensible number of chapters.
- * h1 is tried first; if a book puts its title in an h1 on every page (common in
- * Calibre output) that yields one cut per file, so h2 is tried too and whichever
- * produces more distinct cuts without exploding wins.
+ * The shallowest level whose titles actually differ wins. A running header
+ * (`<h1>` of the book title on every file) has one distinct title, so it is
+ * not a table of contents — the next level down is the chapter. Subsections
+ * are not consulted once a diverse level has been found, or a book of ten
+ * chapters and forty h2s would split into forty chapters.
  */
 export function detectFromHeadings(book: Book, level?: number): Detection {
   const levels = level ? [level] : [1, 2, 3];
@@ -100,10 +105,36 @@ export function detectFromHeadings(book: Book, level?: number): Detection {
       .map((block, at) => ({ block, at }))
       .filter(({ block }) => block.heading === lvl && block.text.length > 0)
       .map(({ block, at }): CutPoint => ({ at, title: block.text, source: 'heading', depth: 0 }));
-    if (cuts.length > best.length && cuts.length <= book.blocks.length / 3) best = cuts;
-    if (level) best = cuts;
+    if (level) {
+      best = cuts;
+      break;
+    }
+    const cap = Math.max(2, Math.floor(book.blocks.length / 3));
+    const distinct = new Set(cuts.map((c) => titleKey(c.title))).size;
+    if (cuts.length >= 2 && cuts.length <= cap && distinct > 1) {
+      best = cuts;
+      break;
+    }
   }
   return { cuts: normalise(best, 'heading'), strategy: 'heading', unresolved: [] };
+}
+
+/**
+ * One sentence a person can act on. The three reasons are different failures:
+ * a cover that is only a picture is normal, a missing id starts the chapter at
+ * the top of its file, and a path outside the spine means the entry was dropped.
+ */
+export function explainUnresolved(item: UnresolvedEntry): string {
+  const label = item.entry.label.trim() || 'A contents entry';
+  const file = item.entry.path || '(no path)';
+  switch (item.reason) {
+    case 'path-not-in-spine':
+      return `"${label}" points at "${file}", which is not in this book's spine, so that contents entry was dropped.`;
+    case 'fragment-not-found':
+      return `"${label}" points at "#${item.entry.fragment ?? ''}" in "${file}", but nothing in that file has that id. The chapter starts at the top of the file instead.`;
+    case 'document-has-no-text':
+      return `"${label}" points at "${file}", which has no extractable text. An image-only cover does this and can be ignored.`;
+  }
 }
 
 /** Last resort: one chapter per spine document. */

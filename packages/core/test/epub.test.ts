@@ -8,6 +8,16 @@ import { deriveTitles } from '../src/titles.js';
 import { inlineMarkdown, renderChapter, countWords, readingMinutes } from '../src/markdown.js';
 import { allBooks, lazyBook, libraryAvailable, loadBook } from './fixtures.js';
 
+/**
+ * Shelf oracles. When no shelf is configured these are not registered, so a
+ * fresh clone does not report them as skipped — the generated suite in
+ * structure.test.ts is what runs instead. Point CHAPTERIZE_FIXTURES at a
+ * directory of your own books to run both.
+ */
+function describeShelf(name: string, fn: () => void): void {
+  if (libraryAvailable()) describe(name, fn);
+}
+
 describe('resolvePath', () => {
   it('resolves relative to the referring document, not the zip root', () => {
     expect(resolvePath('OEBPS/content.opf', 'text/ch1.xhtml')).toBe('OEBPS/text/ch1.xhtml');
@@ -16,9 +26,13 @@ describe('resolvePath', () => {
   it('walks out of directories with ..', () => {
     expect(resolvePath('OEBPS/text/nav.xhtml', '../images/a.png')).toBe('OEBPS/images/a.png');
   });
+  it('treats a leading slash as the zip root and accepts backslashes', () => {
+    expect(resolvePath('OEBPS/nav.xhtml', '/OEBPS/text/ch1.xhtml')).toBe('OEBPS/text/ch1.xhtml');
+    expect(resolvePath('OEBPS/nav.xhtml', 'text\\ch1.xhtml')).toBe('OEBPS/text/ch1.xhtml');
+  });
 });
 
-describe.runIf(libraryAvailable())('real library', () => {
+describeShelf('real library', () => {
   it('opens every book without throwing', () => {
     for (const path of allBooks()) {
       const book = openEpub(new Uint8Array(readFileSync(path)));
@@ -48,7 +62,7 @@ describe.runIf(libraryAvailable())('real library', () => {
   });
 });
 
-describe.runIf(libraryAvailable())('The 48 Laws of Power — EPUB 2, NCX, one file per chapter', () => {
+describeShelf('The 48 Laws of Power — EPUB 2, NCX, one file per chapter', () => {
   const load = lazyBook('Laws of Power');
   const open = () => openEpub(load());
 
@@ -96,7 +110,7 @@ describe.runIf(libraryAvailable())('The 48 Laws of Power — EPUB 2, NCX, one fi
   });
 });
 
-describe.runIf(libraryAvailable())('structural edge cases across the library', () => {
+describeShelf('structural edge cases across the library', () => {
   it('Word Power: 362 spine files collapse into ~29 chapters spanning many files each', () => {
     const book = openEpub(loadBook('Word Power'));
     expect(book.spine.length).toBeGreaterThan(300);
@@ -156,7 +170,7 @@ describe.runIf(libraryAvailable())('structural edge cases across the library', (
   });
 });
 
-describe.runIf(libraryAvailable())('stub chapters', () => {
+describeShelf('stub chapters', () => {
   it('dissolves a near-empty opening chapter into the first real one', () => {
     const book = openEpub(loadBook('Laws of Power'));
     const { cuts } = detect(book);
@@ -178,7 +192,7 @@ describe.runIf(libraryAvailable())('stub chapters', () => {
   });
 });
 
-describe.runIf(libraryAvailable())('paragraphs split across printed lines', () => {
+describeShelf('paragraphs split across printed lines', () => {
   it('rejoins a sidebar that the converter broke into one <p> per line', () => {
     const book = openEpub(loadBook('Laws of Power'));
     const joined = book.blocks.find((b) => b.text.startsWith('The Stars in the'));
@@ -201,7 +215,7 @@ describe.runIf(libraryAvailable())('paragraphs split across printed lines', () =
   });
 });
 
-describe.runIf(libraryAvailable())('inline markup and figures', () => {
+describeShelf('inline markup and figures', () => {
   it('keeps inline emphasis but strips every attribute', () => {
     for (const path of allBooks()) {
       const book = openEpub(new Uint8Array(readFileSync(path)));
@@ -223,7 +237,7 @@ describe.runIf(libraryAvailable())('inline markup and figures', () => {
   });
 });
 
-describe.runIf(libraryAvailable())('derived titles say something new', () => {
+describeShelf('derived titles say something new', () => {
   it('never appends a bare numeral or a phrase the label already contains', () => {
     for (const path of allBooks()) {
       const book = openEpub(new Uint8Array(readFileSync(path)));
@@ -242,7 +256,7 @@ describe.runIf(libraryAvailable())('derived titles say something new', () => {
   });
 });
 
-describe.runIf(libraryAvailable())('titles keep the book\'s own wording', () => {
+describeShelf('titles keep the book\'s own wording', () => {
   it('recovers a name only when the label is a bare enumerator', () => {
     const laws = openEpub(loadBook('Laws of Power'));
     const lawTitles = deriveTitles(
@@ -303,7 +317,7 @@ function danglingMarkers(text: string): number {
   return bad;
 }
 
-describe.runIf(libraryAvailable())('exported chapters are valid Markdown', () => {
+describeShelf('exported chapters are valid Markdown', () => {
   it('never leaves a space against an emphasis marker', () => {
     const book = openEpub(loadBook('Atomic Habits'));
     const chapters = deriveTitles(
@@ -319,7 +333,7 @@ describe.runIf(libraryAvailable())('exported chapters are valid Markdown', () =>
   });
 });
 
-describe.runIf(libraryAvailable())('non-linear documents and footnotes', () => {
+describeShelf('non-linear documents and footnotes', () => {
   const load = lazyBook('Atomic Habits');
   const open = () => openEpub(load());
 

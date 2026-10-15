@@ -4,11 +4,10 @@ import { join } from 'node:path';
 /**
  * Where the real books live.
  *
- * Parsing bugs in this project were all found by real EPUBs and invisible to
- * hand-written fixtures, so the suite runs against a real shelf — but nobody
- * else's shelf is at the same path, and a maintainer's reading list is not
- * something a public repository should carry. Point CHAPTERIZE_FIXTURES at a
- * directory of .epub files to run these tests; without it they skip.
+ * The default suite builds its own books. This loader is the extra pass: point
+ * CHAPTERIZE_FIXTURES at a directory of .epub files and the shelf oracles run
+ * too. A maintainer's reading list is not something the repository should carry,
+ * so without the variable those oracles are simply not registered.
  */
 const ROOTS = (process.env['CHAPTERIZE_FIXTURES'] ?? '')
   .split(':')

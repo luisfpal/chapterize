@@ -1,5 +1,5 @@
-import { unzipSync, strFromU8 } from 'fflate';
-import type { AnyNode, Element } from 'domhandler';
+import { unzipSync } from 'fflate';
+import type { AnyNode, Document, Element } from 'domhandler';
 import type { Block, Book, BookMetadata, NoteRef, SpineItem, TocEntry } from './types.js';
 import { attr, children, findAll, findFirst, isElement, parseHtml, parseXml, textOf } from './xml.js';
 
@@ -11,6 +11,23 @@ const BLOCK_TAGS = new Set([
   'pre', 'figcaption', 'td', 'th', 'dt', 'dd', 'section', 'article', 'aside',
 ]);
 
+/**
+ * Inline elements worth keeping. Everything else is unwrapped to its text, and
+ * NO attributes survive — the rendered HTML carries no href, src or handler, so
+ * book content cannot reach anything outside the paragraph it lives in.
+ */
+const INLINE_KEEP = new Set(['em', 'i', 'strong', 'b', 'sup', 'sub', 'code', 'cite', 'q', 'small', 'u']);
+
+/** One footnote, as opposed to the section that holds several of them. */
+const NOTE_TYPES = new Set(['footnote', 'endnote', 'rearnote', 'doc-footnote', 'doc-endnote']);
+
+const NOTE_GROUPS = new Set(['footnotes', 'endnotes', 'rearnotes', 'doc-endnotes', 'doc-footnotes']);
+
+/** A nav that must never be read as the table of contents. */
+const AUX_NAV = new Set(['page-list', 'landmarks', 'lot', 'loi', 'doc-pagelist', 'doc-landmarks']);
+
+const CONTENT_FILE = /\.(xhtml|html|htm|opf|ncx)(?:$|\?)/i;
+
 export class EpubError extends Error {
   constructor(message: string) {
     super(message);
@@ -18,138 +35,349 @@ export class EpubError extends Error {
   }
 }
 
-/** Resolve `href` against the directory of `base`, returning a zip-root path. */
-export function resolvePath(base: string, href: string): string {
-  const dir = base.includes('/') ? base.slice(0, base.lastIndexOf('/')) : '';
-  const joined = dir ? `${dir}/${href}` : href;
+/**
+ * Collapse `.`, `..`, backslashes and duplicate slashes.
+ *
+ * Zip entries, manifest hrefs and content links disagree about all four, and a
+ * mismatch drops the file silently — the spine then points at a path the
+ * archive does not have.
+ */
+function canonicalPath(p: string): string {
   const parts: string[] = [];
-  for (const seg of joined.split('/')) {
-    if (seg === '.' || seg === '') continue;
+  for (const seg of p.replace(/\\/g, '/').split('/')) {
+    if (seg === '' || seg === '.') continue;
     if (seg === '..') parts.pop();
     else parts.push(seg);
   }
   return parts.join('/');
 }
 
-function splitHref(href: string): { path: string; fragment?: string } {
-  const hash = href.indexOf('#');
-  if (hash < 0) return { path: decodeURIComponent(href) };
+/** Resolve `href` against the directory of `base`, returning a zip-root path. */
+export function resolvePath(base: string, href: string): string {
+  const clean = href.replace(/\\/g, '/');
+  // A leading slash is the zip root. Resolving it against the OPF directory
+  // produced `OEBPS/OEBPS/...` and every chapter in that book failed to open.
+  if (clean.startsWith('/')) return canonicalPath(clean);
+  const dir = base.includes('/') ? base.slice(0, base.lastIndexOf('/')) : '';
+  return canonicalPath(dir ? `${dir}/${clean}` : clean);
+}
+
+function safeDecode(s: string): string {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    // A stray "%" is a bad escape, not a reason to reject the book. The link
+    // then fails to resolve and the contents entry says so.
+    return s;
+  }
+}
+
+/** Split and resolve one href from a document at `base`. */
+function resolveHref(base: string, href: string): { path: string; fragment?: string } {
+  const clean = href.trim().replace(/\\/g, '/');
+  const hash = clean.indexOf('#');
+  let rawPath = hash < 0 ? clean : clean.slice(0, hash);
+  const fragRaw = hash < 0 ? '' : clean.slice(hash + 1);
+  const query = rawPath.indexOf('?');
+  if (query >= 0) rawPath = rawPath.slice(0, query);
+  rawPath = safeDecode(rawPath);
+  // "#id" is this document, not its directory. Resolving the empty path
+  // against the directory landed on the folder and the id was never found.
+  const path = rawPath === '' ? canonicalPath(base) : resolvePath(base, rawPath);
+  const fragment = fragRaw ? safeDecode(fragRaw) : undefined;
+  return fragment ? { path, fragment } : { path };
+}
+
+interface Archive {
+  get(path: string): Uint8Array | undefined;
+}
+
+/**
+ * Paths are matched case-insensitively because a book packed on Windows and a
+ * manifest written as `Text/ch1.xhtml` otherwise disagree, and the chapter
+ * vanishes.
+ */
+function indexArchive(entries: Record<string, Uint8Array>): Archive {
+  const byPath = new Map<string, Uint8Array>();
+  const byLower = new Map<string, Uint8Array>();
+  for (const [rawKey, bytes] of Object.entries(entries)) {
+    if (!rawKey || rawKey.endsWith('/')) continue;
+    const key = canonicalPath(rawKey);
+    if (!key || byPath.has(key)) continue;
+    byPath.set(key, bytes);
+    const lower = key.toLowerCase();
+    if (!byLower.has(lower)) byLower.set(lower, bytes);
+  }
   return {
-    path: decodeURIComponent(href.slice(0, hash)),
-    fragment: decodeURIComponent(href.slice(hash + 1)),
+    get(path: string): Uint8Array | undefined {
+      const key = canonicalPath(path);
+      return byPath.get(key) ?? byLower.get(key.toLowerCase());
+    },
   };
 }
 
-export function openEpub(bytes: Uint8Array): Book {
-  let files: Record<string, Uint8Array>;
+function latin1Prefix(bytes: Uint8Array, n: number): string {
+  const end = Math.min(bytes.length, n);
+  let out = '';
+  for (let i = 0; i < end; i++) out += String.fromCharCode(bytes[i]!);
+  return out;
+}
+
+/** Encoding from an XML declaration or an HTML charset, both of which are ASCII. */
+function declaredEncoding(bytes: Uint8Array): string | undefined {
+  const head = latin1Prefix(bytes, 800);
+  const xml = /<\?xml[^>]*encoding\s*=\s*["']([^"']+)["']/i.exec(head);
+  if (xml?.[1]) return xml[1];
+  const meta = /charset\s*=\s*["']?\s*([^"'>\s;]+)/i.exec(head);
+  return meta?.[1];
+}
+
+function normalizeEncoding(label: string): string {
+  const key = label.trim().toLowerCase().replace(/_/g, '-');
+  if (key === 'cp1252' || key === 'windows1252') return 'windows-1252';
+  if (key === 'utf8') return 'utf-8';
+  return key;
+}
+
+/**
+ * EPUB 3 is UTF-8. EPUB 2 is whatever the file declares, and a lot of EPUB 2
+ * never declares anything and is Windows-1252. `strFromU8` is UTF-8 only, so a
+ * curly quote became a replacement character and the quote no longer matched
+ * the text the reader had highlighted.
+ */
+function decode(bytes: Uint8Array, path: string): string {
+  if (bytes.length >= 2 && bytes[0] === 0xFE && bytes[1] === 0xFF) {
+    return new TextDecoder('utf-16be').decode(bytes);
+  }
+  if (bytes.length >= 2 && bytes[0] === 0xFF && bytes[1] === 0xFE) {
+    return new TextDecoder('utf-16le').decode(bytes);
+  }
+  const declared = declaredEncoding(bytes);
+  if (declared) {
+    try {
+      return new TextDecoder(normalizeEncoding(declared)).decode(bytes);
+    } catch {
+      throw new EpubError(
+        `Cannot read "${path}": encoding "${declared}" is not supported. Re-save the book as UTF-8 and try again.`,
+      );
+    }
+  }
   try {
-    files = unzipSync(bytes);
-  } catch (cause) {
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    return new TextDecoder('windows-1252').decode(bytes);
+  }
+}
+
+interface ManifestItem {
+  path: string;
+  properties: string;
+  mediaType: string;
+}
+
+function mediaKind(mediaType: string): 'image' | 'markup' | 'skip' {
+  if (mediaType.includes('ncx') || mediaType.includes('dtbncx')) return 'skip';
+  if (mediaType.includes('svg')) return 'markup';
+  if (mediaType.startsWith('image/')) return 'image';
+  if (mediaType.includes('html') || mediaType.includes('xml') || mediaType === '') return 'markup';
+  return 'skip';
+}
+
+/**
+ * Font obfuscation ships an encryption.xml that lists only font files. DRM
+ * lists the chapters. Treating every encryption.xml as fatal rejected books
+ * whose text was fine and whose fonts were scrambled on purpose.
+ */
+function assertNotEncrypted(archive: Archive): void {
+  const bytes = archive.get('META-INF/encryption.xml');
+  if (!bytes) return;
+  const xml = decode(bytes, 'META-INF/encryption.xml');
+  if (/ns\.adobe\.com\/adept/i.test(xml)) {
     throw new EpubError(
-      'Not a readable EPUB: the file is not a valid ZIP archive. ' +
-      'If it came from a store it may carry DRM, which must be removed before it can be opened.',
+      'Cannot open this EPUB: it is DRM-protected (Adobe Adept, META-INF/encryption.xml). Chapterize cannot remove DRM.',
+    );
+  }
+  let doc: Document;
+  try {
+    doc = parseXml(xml);
+  } catch {
+    // Unreadable XML is not evidence of DRM. Rejecting the book here would
+    // refuse a file whose chapters are plain text and whose encryption
+    // manifest is just corrupt.
+    return;
+  }
+  const protectedContent: string[] = [];
+  for (const ref of findAll(doc, 'CipherReference')) {
+    const uri = attr(ref, 'URI');
+    if (!uri) continue;
+    const path = safeDecode(uri.replace(/\\/g, '/').replace(/^\/+/, ''));
+    if (CONTENT_FILE.test(path)) protectedContent.push(path);
+  }
+  const sample = protectedContent[0];
+  if (sample) {
+    throw new EpubError(
+      `Cannot open this EPUB: "${sample}" is encrypted (META-INF/encryption.xml). Chapterize cannot open DRM-protected books.`,
+    );
+  }
+}
+
+export function openEpub(bytes: Uint8Array): Book {
+  let entries: Record<string, Uint8Array>;
+  try {
+    entries = unzipSync(bytes);
+  } catch (cause) {
+    const detail = cause instanceof Error && cause.message ? ` (${cause.message})` : '';
+    throw new EpubError(
+      `Cannot open this file as an EPUB: it is not a valid ZIP archive${detail}. ` +
+      'If it came from a store, it may be DRM-protected — remove the DRM and try again.',
+    );
+  }
+  const archive = indexArchive(entries);
+
+  const container = archive.get(CONTAINER);
+  if (!container) {
+    throw new EpubError(
+      `Cannot open this file as an EPUB: "${CONTAINER}" is missing, so there is no package to read.`,
+    );
+  }
+  assertNotEncrypted(archive);
+  const rootfile = findFirst(parseXml(decode(container, CONTAINER)), 'rootfile');
+  const opfPathRaw = rootfile && attr(rootfile, 'full-path');
+  if (!opfPathRaw) {
+    throw new EpubError(
+      'Cannot open this EPUB: META-INF/container.xml has no <rootfile full-path> pointing at the package document.',
+    );
+  }
+  const opfPath = canonicalPath(opfPathRaw);
+  const opfBytes = archive.get(opfPath);
+  if (!opfBytes) {
+    throw new EpubError(
+      `Cannot open this EPUB: the package document "${opfPath}" listed in container.xml is not in the archive.`,
     );
   }
 
-  const read = (path: string): string => {
-    const raw = files[path];
-    if (!raw) throw new EpubError(`EPUB is missing "${path}".`);
-    return strFromU8(raw);
-  };
-
-  // 1. container.xml -> package document path
-  if (!files[CONTAINER]) throw new EpubError(`EPUB is missing "${CONTAINER}"; it is not a valid EPUB.`);
-  const rootfile = findFirst(parseXml(read(CONTAINER)), 'rootfile');
-  const opfPath = rootfile && attr(rootfile, 'full-path');
-  if (!opfPath) throw new EpubError('container.xml does not declare a package document (<rootfile full-path>).');
-
-  // 2. package document -> metadata, manifest, spine
-  const opf = parseXml(read(opfPath));
+  const opf = parseXml(decode(opfBytes, opfPath));
   const pkg = findFirst(opf, 'package');
   const metadata = readMetadata(opf, pkg);
 
-  const manifest = new Map<string, { path: string; properties: string }>();
+  const manifest = new Map<string, ManifestItem>();
   for (const item of findAll(opf, 'item')) {
     const id = attr(item, 'id');
     const href = attr(item, 'href');
     if (!id || !href) continue;
     manifest.set(id, {
-      path: resolvePath(opfPath, splitHref(href).path),
+      path: resolveHref(opfPath, href).path,
       properties: attr(item, 'properties') ?? '',
+      mediaType: (attr(item, 'media-type') ?? '').toLowerCase(),
     });
   }
 
   const spineEl = findFirst(opf, 'spine');
   const spine: SpineItem[] = [];
+  const mediaTypes: string[] = [];
+  const unknown: string[] = [];
   for (const ref of spineEl ? findAll(spineEl, 'itemref') : []) {
     const idref = attr(ref, 'idref');
-    const entry = idref ? manifest.get(idref) : undefined;
-    if (!idref || !entry) continue;
-    spine.push({ id: idref, path: entry.path, linear: attr(ref, 'linear') !== 'no' });
-  }
-  if (spine.length === 0) throw new EpubError('EPUB spine is empty: there is no readable content.');
-
-  // 3. Table of contents: EPUB 3 nav preferred, EPUB 2 NCX as fallback.
-  let toc: TocEntry[] = [];
-  let tocSource: Book['tocSource'] = 'none';
-
-  const navEntry = [...manifest.values()].find((m) => m.properties.split(/\s+/).includes('nav'));
-  if (navEntry && files[navEntry.path]) {
-    toc = readNav(read(navEntry.path), navEntry.path);
-    if (toc.length) tocSource = 'nav';
-  }
-  if (!toc.length) {
-    const ncxId = spineEl ? attr(spineEl, 'toc') : undefined;
-    const ncx = ncxId ? manifest.get(ncxId) : undefined;
-    if (ncx && files[ncx.path]) {
-      toc = readNcx(read(ncx.path), ncx.path);
-      if (toc.length) tocSource = 'ncx';
+    if (!idref) continue;
+    const entry = manifest.get(idref);
+    if (!entry) {
+      unknown.push(idref);
+      continue;
     }
+    spine.push({
+      id: idref,
+      path: entry.path,
+      linear: (attr(ref, 'linear') ?? 'yes').toLowerCase() !== 'no',
+    });
+    mediaTypes.push(entry.mediaType);
+  }
+  if (spine.length === 0) {
+    throw new EpubError(
+      unknown.length
+        ? `Cannot open this EPUB: the spine ids (${unknown.slice(0, 5).join(', ')}) do not match any manifest item.`
+        : 'Cannot open this EPUB: the spine lists no documents to read.',
+    );
   }
 
-  // 4. Flatten the spine into one linear block array.
-  // `linear="no"` means the document sits outside the reading flow. Books put
-  // their footnote bodies there, one file per note; folding them into the flow
-  // drops a chapter-1 footnote into the back matter as orphaned text.
+  const { toc, tocSource } = loadToc(manifest, spine, spineEl, archive);
+
   const raw: Block[] = [];
   const aside: Block[] = [];
+  const noteHits: NoteHit[] = [];
   spine.forEach((item, spineIndex) => {
-    const data = files[item.path];
-    if (!data) return;
-    collectBlocks(strFromU8(data), item.path, spineIndex, item.linear ? raw : aside);
+    const data = archive.get(item.path);
+    if (!data) {
+      // A missing chapter is the book being incomplete. A missing footnote file
+      // is one note; the chapter it belongs to is still readable.
+      if (item.linear) {
+        throw new EpubError(
+          `Cannot open this EPUB: spine item "${item.id}" points at "${item.path}", which is not in the archive. The book is incomplete.`,
+        );
+      }
+      return;
+    }
+    const kind = mediaKind(mediaTypes[spineIndex] ?? '');
+    if (kind === 'skip') return;
+    if (kind === 'image') {
+      if (item.linear) raw.push(imageBlock(spineIndex, item.path));
+      return;
+    }
+    let collected: { blocks: Block[]; notes: NoteHit[] };
+    try {
+      collected = collectBlocks(decode(data, item.path), item.path, spineIndex);
+    } catch (cause) {
+      if (cause instanceof EpubError) throw cause;
+      const detail = cause instanceof Error ? cause.message : 'the markup could not be parsed';
+      throw new EpubError(
+        `Cannot read "${item.path}": ${detail}. The file may be truncated or not HTML.`,
+      );
+    }
+    (item.linear ? raw : aside).push(...collected.blocks);
+    noteHits.push(...collected.notes);
   });
   const blocks = joinWrappedLines(raw);
 
-  // Note bodies, addressable by the href their reference carries. Both the
-  // element's own id and its document are registered, because a note file that
-  // holds a single note is often linked without a fragment.
   const notes = new Map<string, string>();
+  const addNote = (key: string, text: string): void => {
+    const cleaned = stripNoteMarker(text);
+    if (!cleaned) return;
+    const existing = notes.get(key);
+    notes.set(key, existing ? `${existing} ${cleaned}` : cleaned);
+  };
+  for (const hit of noteHits) addNote(hit.key, hit.text);
+  // Non-linear documents are notes in their entirety, including ones the
+  // publisher never marked with epub:type. Joining first so a note split into
+  // one <p> per printed line is stored as one paragraph, not one sentence per id.
   for (const block of joinWrappedLines(aside)) {
     if (!block.text) continue;
-    // Note bodies usually repeat the marker they are referenced by ("* Interested
-    // readers…"); the Markdown footnote supplies its own, so drop the duplicate.
-    const text = block.text.replace(/^\s*(?:[*\u2020\u2021\u00a7]+|\d{1,3}[.)]?)\s+/, '');
-    if (!text) continue;
-    for (const id of block.ids) {
-      notes.set(`${block.path}#${id}`, text);
-    }
-    const existing = notes.get(block.path);
-    notes.set(block.path, existing ? `${existing} ${text}` : text);
+    for (const id of block.ids) addNote(`${block.path}#${id}`, block.text);
+    addNote(block.path, block.text);
   }
 
-  // Only the figures the text actually references, so an unused cover gallery
-  // does not sit in memory for the whole session.
   const wanted = new Set(blocks.map((b) => b.image).filter((p): p is string => p !== undefined));
   const images = new Map<string, Uint8Array>();
   for (const path of wanted) {
-    const data = files[path];
+    const data = archive.get(path);
     if (data) images.set(path, data);
   }
 
   return { metadata, spine, blocks, toc, tocSource, images, notes };
 }
 
-function readMetadata(opf: ReturnType<typeof parseXml>, pkg: Element | undefined): BookMetadata {
+function imageBlock(spineIndex: number, path: string): Block {
+  return {
+    spineIndex,
+    path,
+    ids: [],
+    tag: 'figure',
+    heading: 0,
+    text: '',
+    html: '',
+    image: path,
+  };
+}
+
+function readMetadata(opf: Document, pkg: Element | undefined): BookMetadata {
   const meta = findFirst(opf, 'metadata');
   const pick = (name: string): string | undefined => {
     const el = meta ? findAll(meta, name)[0] : undefined;
@@ -164,35 +392,85 @@ function readMetadata(opf: ReturnType<typeof parseXml>, pkg: Element | undefined
   };
 }
 
-/** EPUB 3: `<nav epub:type="toc">` containing nested `<ol><li><a href>`. */
-function readNav(source: string, navPath: string): TocEntry[] {
+function typeTokens(el: Element): string[] {
+  return `${attr(el, 'type') ?? ''} ${attr(el, 'role') ?? ''}`
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+function isTocNav(el: Element): boolean {
+  const tokens = typeTokens(el);
+  return tokens.includes('toc') || tokens.includes('doc-toc');
+}
+
+function isAuxNav(el: Element): boolean {
+  return typeTokens(el).some((token) => AUX_NAV.has(token));
+}
+
+/**
+ * EPUB 3 nav. Only `epub:type="toc"` is a table of contents. `page-list` is
+ * print-page anchors — one book had 174 of them — and reading it invents a
+ * chapter per page.
+ */
+function readNav(source: string, navPath: string, requireTocType: boolean): TocEntry[] {
   const doc = parseHtml(source);
   const navs = findAll(doc, 'nav');
-  const tocNav = navs.find((n) => (attr(n, 'type') ?? '').split(/\s+/).includes('toc')) ?? navs[0];
+  const tocNav = navs.find(isTocNav) ?? (requireTocType ? undefined : navs.find((n) => !isAuxNav(n)));
   if (!tocNav) return [];
 
   const out: TocEntry[] = [];
+  const pushAnchor = (anchor: Element, depth: number): void => {
+    const href = attr(anchor, 'href');
+    if (!href) return;
+    const located = resolveHref(navPath, href);
+    out.push({
+      label: textOf(anchor),
+      path: located.path,
+      ...(located.fragment !== undefined ? { fragment: located.fragment } : {}),
+      depth,
+    });
+  };
   const walkList = (list: Element, depth: number): void => {
     for (const li of children(list, 'li')) {
       const anchor = findAll(li, 'a')[0];
-      const href = anchor ? attr(anchor, 'href') : undefined;
-      if (anchor && href) {
-        const { path, fragment } = splitHref(href);
-        out.push({
-          label: textOf(anchor),
-          path: resolvePath(navPath, path),
-          ...(fragment !== undefined ? { fragment } : {}),
-          depth,
-        });
-      }
-      for (const sub of children(li, 'ol')) walkList(sub, depth + 1);
+      if (anchor) pushAnchor(anchor, depth);
+      for (const sub of sublists(li)) walkList(sub, depth + 1);
     }
   };
-  for (const list of children(tocNav, 'ol')) walkList(list, 0);
+  const lists = topLists(tocNav);
+  if (lists.length) {
+    for (const list of lists) walkList(list, 0);
+  } else {
+    // A contents list written as bare links, with no <ol>, is still a contents
+    // list. Dropping it sent the book to the heading fallback for no reason.
+    for (const anchor of findAll(tocNav, 'a')) pushAnchor(anchor, 0);
+  }
   return out;
 }
 
-/** EPUB 2: `<navMap>` containing nested `<navPoint><navLabel><text>` + `<content src>`. */
+/** An `<ol>` wrapped in a `<div>` under `<nav>` is still the contents list. */
+function topLists(nav: Element): Element[] {
+  const direct = children(nav, 'ol');
+  if (direct.length) return direct;
+  const all = findAll(nav, 'ol');
+  return all.filter((ol) => !all.some((other) => other !== ol && containsNode(other, ol)));
+}
+
+function sublists(li: Element): Element[] {
+  const direct = children(li, 'ol');
+  if (direct.length) return direct;
+  const nested = findAll(li, 'ol').filter((ol) => !findAll(li, 'ol').some(
+    (other) => other !== ol && containsNode(other, ol),
+  ));
+  return nested;
+}
+
+function containsNode(ancestor: Element, node: Element): boolean {
+  return findAll(ancestor, node.name).includes(node);
+}
+
+/** EPUB 2 NCX. `pageList` is print pages and is ignored, same as EPUB 3 page-list. */
 function readNcx(source: string, ncxPath: string): TocEntry[] {
   const doc = parseXml(source);
   const navMap = findFirst(doc, 'navMap');
@@ -205,11 +483,11 @@ function readNcx(source: string, ncxPath: string): TocEntry[] {
       const content = children(point, 'content')[0];
       const src = content ? attr(content, 'src') : undefined;
       if (src) {
-        const { path, fragment } = splitHref(src);
+        const located = resolveHref(ncxPath, src);
         out.push({
           label: label ? textOf(label) : '',
-          path: resolvePath(ncxPath, path),
-          ...(fragment !== undefined ? { fragment } : {}),
+          path: located.path,
+          ...(located.fragment !== undefined ? { fragment: located.fragment } : {}),
           depth,
         });
       }
@@ -220,23 +498,62 @@ function readNcx(source: string, ncxPath: string): TocEntry[] {
   return out;
 }
 
-/**
- * Inline elements worth keeping. Everything else is unwrapped to its text, and
- * NO attributes survive — the rendered HTML carries no href, src or handler, so
- * book content cannot reach anything outside the paragraph it lives in.
- */
-const INLINE_KEEP = new Set(['em', 'i', 'strong', 'b', 'sup', 'sub', 'code', 'cite', 'q', 'small', 'u']);
+function loadToc(
+  manifest: Map<string, ManifestItem>,
+  spine: SpineItem[],
+  spineEl: Element | undefined,
+  archive: Archive,
+): { toc: TocEntry[]; tocSource: Book['tocSource'] } {
+  const items = [...manifest.values()];
+  const navItem = items.find((m) => m.properties.split(/\s+/).includes('nav'))
+    ?? items.find((m) => /(?:^|\/)nav\.xhtml$/i.test(m.path));
+  if (navItem) {
+    const bytes = archive.get(navItem.path);
+    if (bytes) {
+      const toc = readNav(decode(bytes, navItem.path), navItem.path, false);
+      if (toc.length) return { toc, tocSource: 'nav' };
+    }
+  }
+
+  const ncxId = spineEl ? attr(spineEl, 'toc') : undefined;
+  const ncx = (ncxId ? manifest.get(ncxId) : undefined)
+    ?? items.find((m) => m.mediaType.includes('ncx') || m.path.toLowerCase().endsWith('.ncx'));
+  if (ncx) {
+    const bytes = archive.get(ncx.path);
+    if (bytes) {
+      const toc = readNcx(decode(bytes, ncx.path), ncx.path);
+      if (toc.length) return { toc, tocSource: 'ncx' };
+    }
+  }
+
+  // The nav document is in the spine but nobody set properties="nav". Require
+  // an explicit toc type so a chapter that happens to contain a <nav> of links
+  // does not become the table of contents.
+  for (const item of spine) {
+    const bytes = archive.get(item.path);
+    if (!bytes) continue;
+    if (!/<nav[\s>]/i.test(latin1Prefix(bytes, Math.min(bytes.length, 200_000)))) continue;
+    const text = decode(bytes, item.path);
+    const toc = readNav(text, item.path, true);
+    if (toc.length) return { toc, tocSource: 'nav' };
+  }
+  return { toc: [], tocSource: 'none' };
+}
 
 function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 /**
- * Serialise inline markup, stripping tags outside the whitelist but keeping their
- * text. The concatenated text nodes equal `textOf(el)`, which annotation offsets
- * depend on.
+ * Serialise inline markup so its text nodes concatenate to `textOf`.
+ *
+ * A space inside a tag and a space after it are one space in the reading
+ * text (`<b>bold </b> stay` is "bold stay"). Collapsing the serialised string
+ * cannot see that, because the tag sits between the two spaces, and annotation
+ * offsets then point at the wrong character. Edge whitespace is walked out of
+ * the tags first, empty tags are dropped, and only then is whitespace collapsed.
  */
-function inlineHtml(node: AnyNode): string {
+function serializeNodes(nodes: AnyNode[]): string {
   let out = '';
   const walk = (n: AnyNode): void => {
     if (n.type === 'text') {
@@ -246,23 +563,62 @@ function inlineHtml(node: AnyNode): string {
     if (!isElement(n)) return;
     const tag = n.name.toLowerCase();
     if (tag === 'script' || tag === 'style') return;
-    // A footnote reference keeps its marker text but becomes a tag the renderer
-    // recognises, so "history.*" can become "history.[^1]" on export.
-    const isNoteref =
-      tag === 'a' && /noteref/i.test(`${attr(n, 'type') ?? ''} ${attr(n, 'role') ?? ''}`);
+    if (tag === 'br' || tag === 'hr') {
+      out += ' ';
+      return;
+    }
+    const isNoteref = tag === 'a' && typeTokens(n).some((token) => token.includes('noteref'));
     const emitted = isNoteref ? 'noteref' : tag;
     const keep = isNoteref || INLINE_KEEP.has(tag);
     if (keep) out += `<${emitted}>`;
     for (const child of (n.children ?? []) as AnyNode[]) walk(child);
     if (keep) out += `</${emitted}>`;
   };
-  for (const child of ('children' in node ? (node.children as AnyNode[]) ?? [] : [])) walk(child);
-  return out.replace(/\s+/g, ' ').trim();
+  for (const node of nodes) walk(node);
+  return normaliseInlineHtml(out);
+}
+
+function normaliseInlineHtml(html: string): string {
+  let cur = html;
+  // Nesting: the inner tag has to shed its space before the outer one can.
+  for (let i = 0; i < 8; i++) {
+    const next = cur
+      .replace(/<([a-z0-9]+)>\s+/g, ' <$1>')
+      .replace(/\s+<\/([a-z0-9]+)>/g, '</$1> ');
+    if (next === cur) break;
+    cur = next;
+  }
+  // An empty tag left between two spaces would stop them collapsing into one.
+  cur = cur.replace(/<([a-z0-9]+)><\/\1>/g, '');
+  return cur.replace(/\s+/g, ' ').trim();
+}
+
+function idsIn(node: AnyNode): string[] {
+  const out: string[] = [];
+  const walk = (n: AnyNode): void => {
+    if (!isElement(n)) return;
+    const id = attr(n, 'id');
+    if (id) out.push(id);
+    for (const child of (n.children ?? []) as AnyNode[]) walk(child);
+  };
+  walk(node);
+  return out;
+}
+
+function unique(ids: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const id of ids) {
+    if (seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out;
 }
 
 /**
  * Sentence-final punctuation. A semicolon is deliberately absent: a line ending
- * in one is mid-sentence, and treating it as final cut the sidebar below in half.
+ * in one is mid-sentence, and treating it as final cut a sidebar in half.
  */
 const TERMINAL = /[.!?:\u2026\u201d\u2019"')\]]\s*$/;
 
@@ -296,15 +652,11 @@ function isDisplayLine(text: string): boolean {
 /**
  * Rejoin paragraphs that are really one paragraph split across printed lines.
  *
- * Books converted from scans emit one `<p>` per line of the original page —
- * `<p>The Stars in the</p><p>Sky. There can be only</p>` — which is faithful
- * markup and unreadable prose.
- *
- * Ending without sentence punctuation is necessary but not sufficient: display
- * titles such as `NEVER OUTSHINE THE MASTER` end that way too, and swallowing
- * one into the body below it destroys the chapter's title. So a join also needs
- * positive evidence of continuation — the next line starting lowercase, or this
- * line ending on a comma or a word no sentence ends on.
+ * Books converted from scans emit one `<p>` per line of the original page,
+ * which is faithful markup and unreadable prose. Ending without sentence
+ * punctuation is not enough: display titles end that way too, and swallowing
+ * one destroys the chapter's name. A join also needs positive evidence of
+ * continuation, and it never crosses a display line in either direction.
  */
 function joinWrappedLines(blocks: Block[]): Block[] {
   const out: Block[] = [];
@@ -318,6 +670,7 @@ function joinWrappedLines(blocks: Block[]): Block[] {
       prev.path === block.path &&
       prev.text.length > 0 && block.text.length > 0 &&
       !isDisplayLine(prev.text) &&
+      !isDisplayLine(block.text) &&
       !TERMINAL.test(prev.text);
 
     const continues =
@@ -326,10 +679,11 @@ function joinWrappedLines(blocks: Block[]): Block[] {
         DANGLING.test(prev!.text) ||
         FUNCTION_WORDS.has(lastWord(prev!.text)));
 
-    if (continues) {
-      prev!.text = `${prev!.text} ${block.text}`;
-      prev!.html = `${prev!.html} ${block.html}`;
-      prev!.ids.push(...block.ids);
+    if (continues && prev) {
+      prev.text = `${prev.text} ${block.text}`;
+      prev.html = `${prev.html} ${block.html}`;
+      prev.ids.push(...block.ids);
+      if (block.noterefs?.length) prev.noterefs = [...(prev.noterefs ?? []), ...block.noterefs];
     } else {
       out.push(block);
     }
@@ -337,102 +691,256 @@ function joinWrappedLines(blocks: Block[]): Block[] {
   return out;
 }
 
-/**
- * Footnote references inside one block.
- *
- * Publishers mark these either with `epub:type="noteref"` or ARIA's
- * `role="doc-noteref"`; InDesign-produced books use both at once.
- */
+/** The marker a note body repeats ("1." or "*") — the Markdown footnote supplies its own. */
+function stripNoteMarker(text: string): string {
+  return text.replace(/^\s*(?:[*\u2020\u2021\u00a7]+|\d{1,3}[.)]?)\s+/, '').trim();
+}
+
+function isFootnote(el: Element): boolean {
+  const tokens = typeTokens(el);
+  if (tokens.some((token) => token.includes('noteref'))) return false;
+  return tokens.some((token) => NOTE_TYPES.has(token));
+}
+
+function isNoteGroup(el: Element): boolean {
+  return typeTokens(el).some((token) => NOTE_GROUPS.has(token));
+}
+
 function collectNoterefs(el: Element, path: string): NoteRef[] {
   const out: NoteRef[] = [];
-  for (const anchor of findAll(el, 'a')) {
-    const kind = `${attr(anchor, 'type') ?? ''} ${attr(anchor, 'role') ?? ''}`;
-    if (!/noteref/i.test(kind)) continue;
+  const anchors = el.name.toLowerCase() === 'a' ? [el, ...findAll(el, 'a').slice(1)] : findAll(el, 'a');
+  for (const anchor of anchors) {
+    if (!typeTokens(anchor).some((token) => token.includes('noteref'))) continue;
     const href = attr(anchor, 'href');
     if (!href) continue;
-    const { path: target, fragment } = splitHref(href);
-    const resolved = target ? resolvePath(path, target) : path;
+    const located = resolveHref(path, href);
     out.push({
       label: textOf(anchor) || '*',
-      key: fragment ? `${resolved}#${fragment}` : resolved,
+      key: located.fragment ? `${located.path}#${located.fragment}` : located.path,
     });
   }
   return out;
 }
 
+function noteTargetsIn(doc: Document | Element, docPath: string): Set<string> {
+  const ids = new Set<string>();
+  for (const anchor of findAll(doc, 'a')) {
+    if (!typeTokens(anchor).some((token) => token.includes('noteref'))) continue;
+    const href = attr(anchor, 'href');
+    if (!href) continue;
+    const located = resolveHref(docPath, href);
+    if (located.fragment && located.path === docPath) ids.add(located.fragment);
+  }
+  return ids;
+}
+
+function hasBlockDescendant(el: Element): boolean {
+  for (const child of (el.children ?? []) as AnyNode[]) {
+    if (!isElement(child)) continue;
+    const tag = child.name.toLowerCase();
+    if (tag === 'script' || tag === 'style') continue;
+    if (BLOCK_TAGS.has(tag)) return true;
+    if (hasBlockDescendant(child)) return true;
+  }
+  return false;
+}
+
+interface NoteHit {
+  key: string;
+  text: string;
+}
+
+function blockFrom(
+  spineIndex: number,
+  path: string,
+  ids: string[],
+  tag: string,
+  text: string,
+  html: string,
+  image: { src?: string; alt?: string },
+  noterefs: NoteRef[],
+): Block | undefined {
+  if (!text && !ids.length && !image.src) return undefined;
+  const headingMatch = /^h([1-6])$/.exec(tag);
+  return {
+    spineIndex,
+    path,
+    ids,
+    tag,
+    heading: headingMatch ? Number(headingMatch[1]) : 0,
+    text,
+    html,
+    ...(image.src !== undefined ? { image: image.src } : {}),
+    ...(image.alt ? { alt: image.alt } : {}),
+    ...(noterefs.length ? { noterefs } : {}),
+  };
+}
+
+function firstImage(nodes: AnyNode[], base: string): { src?: string; alt?: string } {
+  const found = nodes.flatMap((node) => (isElement(node) ? [node, ...findAll(node, 'img'), ...findAll(node, 'image')] : []))
+    .find((el) => el.name.toLowerCase() === 'img' || el.name.toLowerCase() === 'image');
+  if (!found) return {};
+  const src = attr(found, 'src') ?? attr(found, 'href');
+  const alt = attr(found, 'alt');
+  return {
+    ...(src ? { src: resolveHref(base, src).path } : {}),
+    ...(alt ? { alt } : {}),
+  };
+}
+
 /**
  * Emit one Block per leaf block-level element, in document order.
  *
- * An `id` on a wrapper (`<div id="ch7"><p>…`) is carried down to the first leaf
- * inside it, so TOC fragments pointing at containers still resolve to a block.
+ * An id on a wrapper, on `<body>`, or on an inline anchor with no text of its
+ * own is carried onto the next real block. An id inside the block is kept on
+ * that block — contents entries point at `<span id>` inside a paragraph often
+ * enough that ignoring it loses the mid-file cut.
+ *
+ * Footnotes are returned separately and never become blocks. A note left in the
+ * flow shows up as a paragraph of its own, then again under the marker.
  */
-function collectBlocks(source: string, path: string, spineIndex: number, out: Block[]): void {
+function collectBlocks(
+  source: string,
+  path: string,
+  spineIndex: number,
+): { blocks: Block[]; notes: NoteHit[] } {
   const doc = parseHtml(source);
-  const body = findFirst(doc, 'body') ?? doc;
-
-  /** Ids seen since the last emitted block; they all point at the next one. */
+  const targets = noteTargetsIn(doc, path);
+  const blocks: Block[] = [];
+  const notes: NoteHit[] = [];
   let pendingIds: string[] = [];
+  const body = findFirst(doc, 'body');
 
-  // An id on <body> addresses the start of the document, and books converted
-  // from Word anchor whole chapters there. Missing it loses every such cut.
-  const bodyId = body.type === 'tag' ? attr(body as Element, 'id') : undefined;
-  if (bodyId) pendingIds.push(bodyId);
-
-  const emit = (el: Element, tag: string): void => {
-    const text = textOf(el);
-    const own = attr(el, 'id');
-    const ids = own ? [...pendingIds, own] : pendingIds;
+  const takePending = (): string[] => {
+    const ids = pendingIds;
     pendingIds = [];
-    const noterefs = collectNoterefs(el, path);
-    const figure = findAll(el, 'img')[0] ?? findAll(el, 'image')[0];
-    const src = figure ? (attr(figure, 'src') ?? attr(figure, 'href')) : undefined;
-    if (!text && !ids.length && !src) return;
-    const headingMatch = /^h([1-6])$/.exec(tag);
-    const alt = figure ? attr(figure, 'alt') : undefined;
-    out.push({
+    return ids;
+  };
+
+  const swallow = (el: Element): void => {
+    // Ancestor ids stay pending. Swallowing them would steal a chapter anchor
+    // that happens to sit on a wrapper above the footnote.
+    const text = textOf(el);
+    if (!text) return;
+    for (const id of unique(idsIn(el))) notes.push({ key: `${path}#${id}`, text });
+  };
+
+  const isNote = (el: Element): boolean =>
+    isFootnote(el) || (attr(el, 'id') !== undefined && targets.has(attr(el, 'id')!));
+
+  const emitElement = (el: Element, tag: string): void => {
+    const text = textOf(el);
+    const image = firstImage([el], path);
+    // An empty paragraph is an anchor, not a blank line. Emitting it would sit
+    // between two wrapped lines and stop them being joined back into a sentence.
+    if (!text && !image.src) {
+      pendingIds.push(...idsIn(el));
+      return;
+    }
+    const block = blockFrom(
       spineIndex,
       path,
-      ids,
+      unique([...takePending(), ...idsIn(el)]),
       tag,
-      heading: headingMatch ? Number(headingMatch[1]) : 0,
       text,
-      html: inlineHtml(el),
-      ...(src !== undefined ? { image: resolvePath(path, splitHref(src).path) } : {}),
-      ...(alt ? { alt } : {}),
-      ...(noterefs.length ? { noterefs } : {}),
-    });
+      serializeNodes((el.children ?? []) as AnyNode[]),
+      image,
+      collectNoterefs(el, path),
+    );
+    if (block) blocks.push(block);
   };
 
-  const hasBlockChild = (el: Element): boolean =>
-    (el.children ?? []).some(
-      (c) => c.type === 'tag' && BLOCK_TAGS.has((c as Element).name.toLowerCase()),
+  const emitInline = (nodes: AnyNode[]): void => {
+    if (!nodes.length) return;
+    const text = textOf(nodes);
+    const image = firstImage(nodes, path);
+    const ownIds = nodes.flatMap((node) => idsIn(node));
+    // A run of whitespace between two paragraphs must not swallow the id of an
+    // anchor that belongs to the next paragraph.
+    if (!text && !image.src) {
+      pendingIds.push(...ownIds);
+      return;
+    }
+    const noterefs = nodes.flatMap((node) => (isElement(node) ? collectNoterefs(node, path) : []));
+    const block = blockFrom(
+      spineIndex,
+      path,
+      unique([...takePending(), ...ownIds]),
+      'p',
+      text,
+      serializeNodes(nodes),
+      image,
+      noterefs,
     );
+    if (block) blocks.push(block);
+  };
 
   const walk = (node: Element): void => {
-    for (const child of node.children ?? []) {
-      if (child.type !== 'tag') continue;
-      const el = child as Element;
-      const tag = el.name.toLowerCase();
+    let inline: AnyNode[] = [];
+    const flush = (): void => {
+      const nodes = inline;
+      inline = [];
+      emitInline(nodes);
+    };
+    for (const child of (node.children ?? []) as AnyNode[]) {
+      if (child.type === 'text') {
+        inline.push(child);
+        continue;
+      }
+      if (!isElement(child)) continue;
+      const tag = child.name.toLowerCase();
       if (tag === 'script' || tag === 'style' || tag === 'head') continue;
 
-      if (tag === 'img' || tag === 'image') {
-        // Figures carry no text, so they would otherwise vanish entirely.
-        emit(el, 'figure');
-      } else if (BLOCK_TAGS.has(tag) && !hasBlockChild(el)) {
-        emit(el, tag);
-      } else {
-        // Not a leaf block: keep its id so it lands on the next real block.
-        const id = attr(el, 'id');
-        if (id) pendingIds.push(id);
-        walk(el);
+      if (isNote(child)) {
+        flush();
+        swallow(child);
+        continue;
       }
+      if (isNoteGroup(child)) {
+        flush();
+        walk(child);
+        continue;
+      }
+      if (tag === 'img' || tag === 'image') {
+        flush();
+        emitElement(child, 'figure');
+        continue;
+      }
+      if (BLOCK_TAGS.has(tag) && !hasBlockDescendant(child)) {
+        flush();
+        emitElement(child, tag);
+        continue;
+      }
+      if (BLOCK_TAGS.has(tag) || hasBlockDescendant(child)) {
+        flush();
+        const id = attr(child, 'id');
+        if (id) pendingIds.push(id);
+        walk(child);
+        continue;
+      }
+      // An empty <a id> is how publishers mark a chapter start. It is not a
+      // paragraph, and emitting one would put the cut on a blank block.
+      if (!textOf(child) && !firstImage([child], path).src) {
+        pendingIds.push(...idsIn(child));
+        continue;
+      }
+      inline.push(child);
     }
+    flush();
   };
-  walk(body as Element);
 
-  // Ids trailing at the end of a document belong to its last block.
-  if (pendingIds.length && out.length) {
-    const last = out[out.length - 1]!;
+  if (body) {
+    const bodyId = attr(body, 'id');
+    if (bodyId) pendingIds.push(bodyId);
+    walk(body);
+  } else {
+    // No <body>: walk the document's children. `walk` only reads `children`.
+    walk(doc as unknown as Element);
+  }
+
+  if (pendingIds.length && blocks.length) {
+    const last = blocks[blocks.length - 1]!;
     if (last.path === path) last.ids.push(...pendingIds);
   }
+  return { blocks, notes };
 }

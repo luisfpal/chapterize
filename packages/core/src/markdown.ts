@@ -52,18 +52,26 @@ function replaceNoterefs(html: string, numbers: number[]): string {
 }
 
 function renderBlock(block: Block, noteNumbers?: number[]): string {
-  if (block.image) {
-    return `![${(block.alt ?? '').replace(/[[\]]/g, '')}](images/${imageFilename(block.image)})`;
+  // A picture and its caption live in one block when the markup put them
+  // there. Rendering only the picture drops the sentence beside it.
+  const image = block.image
+    ? `![${(block.alt ?? '').replace(/[[\]]/g, '')}](images/${imageFilename(block.image)})`
+    : '';
+  let prose = '';
+  if (block.text) {
+    if (block.heading > 0) prose = `${'#'.repeat(Math.min(block.heading, 6))} ${block.text}`;
+    else if (block.tag === 'li') prose = `- ${block.text}`;
+    else if (block.tag === 'blockquote') prose = `> ${block.text}`;
+    else if (block.tag === 'pre') prose = '```\n' + block.text + '\n```';
+    else {
+      // Inline emphasis is carried through so exported prose keeps the author's
+      // stress; the tag set is a fixed whitelist, so this cannot emit anything else.
+      const html = noteNumbers ? replaceNoterefs(block.html, noteNumbers) : block.html;
+      prose = html ? inlineMarkdown(html) : block.text;
+    }
   }
-  if (!block.text) return '';
-  if (block.heading > 0) return `${'#'.repeat(Math.min(block.heading, 6))} ${block.text}`;
-  if (block.tag === 'li') return `- ${block.text}`;
-  if (block.tag === 'blockquote') return `> ${block.text}`;
-  if (block.tag === 'pre') return '```\n' + block.text + '\n```';
-  // Inline emphasis is carried through so exported prose keeps the author's
-  // stress; the tag set is a fixed whitelist, so this cannot emit anything else.
-  const html = noteNumbers ? replaceNoterefs(block.html, noteNumbers) : block.html;
-  return html ? inlineMarkdown(html) : block.text;
+  if (image && prose) return `${image}\n\n${prose}`;
+  return image || prose;
 }
 
 /**

@@ -99,6 +99,13 @@ export function deriveTitle(
   if (!derived) return label || 'Untitled';
   if (!label) return derived;
 
+  // A running header copied onto every chapter is not a name. "Field Notes"
+  // on all forty files must not prefix, or beat, the real title underneath.
+  const labelIsBoilerplate = boilerplate.has(normalise(label));
+  if (labelIsBoilerplate) {
+    return normalise(derived) === normalise(label) ? label : derived;
+  }
+
   // The book already gave this chapter a name; do not decorate it.
   if (!isEnumerator(label)) return label;
 

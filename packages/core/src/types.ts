@@ -137,10 +137,11 @@ export interface Book {
   /**
    * Footnote bodies by `path#id`.
    *
-   * These live in spine documents marked `linear="no"` — EPUB's way of saying
-   * "not part of the reading flow". They are kept out of `blocks` so a note for
-   * chapter 1 cannot surface thirty chapters later as loose text, and are
-   * reachable only through the reference that points at them.
+   * A note is either a spine document marked `linear="no"`, or an element in a
+   * chapter that is marked as a footnote (`epub:type` / `role`) or is the target
+   * of a noteref in that same file. Notes stay out of `blocks` so a chapter-1
+   * footnote cannot reappear later as loose text. They are reachable only
+   * through the reference that points at them.
    */
   notes: Map<string, string>;
   /** How the TOC was obtained; 'none' when the book has neither nav nor NCX. */
