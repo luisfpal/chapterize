@@ -211,6 +211,8 @@ describe('mechanisms fixture', () => {
     expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
     expect(html).not.toMatch(/<script/i);
     expect(html).toContain('prefers-color-scheme: dark');
+    // The answer sits in a disclosure, so opening the file does not reveal it.
+    expect(html.match(/<details>/g)?.length).toBe(packFor(levers).questions.length);
   });
 
   it('writes a prompt that fences the chapter and does not call a model', () => {

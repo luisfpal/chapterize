@@ -784,7 +784,7 @@ export function renderStudyHtml(pack: StudyPack): string {
   h2 { margin: 2rem 0 0.75rem; font-size: 1.25rem; letter-spacing: -0.016em; }
   .note, .empty { color: #6e6e73; font-size: 0.95rem; }
   .step { padding-left: calc(var(--indent) * 0.9rem); margin: 0 0 1.15rem; }
-  .step h3 { margin: 0; font-size: 1.05rem; line-height: 1.3; font-weight: 650; }
+  .step h3 { margin: 0; font-size: 1.05rem; line-height: 1.3; font-weight: 600; }
   .num {
     display: inline-block;
     min-width: 1.4rem;
