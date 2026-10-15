@@ -39,6 +39,11 @@ export interface OutlineStep {
   whySource: WhySource;
   /** Later sentences of this step, in order. The establishing sentence is not repeated. */
   points: string[];
+  /**
+   * A citation whose body is not in the book. Shown so the hole is visible.
+   * Not the author's sentence, so it is never a key idea or a question.
+   */
+  gaps: string[];
   children: OutlineStep[];
 }
 
@@ -93,6 +98,12 @@ export interface StudyInput {
    * so a sentence that merely mentions the title survives.
    */
   boilerplate?: ReadonlySet<string>;
+  /**
+   * Footnote bodies by `path#id`, from `Book.notes`. A note is part of the
+   * step that cites it. The same note cited twice is written once, at the
+   * first citation: repeating a page of fine print does not teach it twice.
+   */
+  notes?: ReadonlyMap<string, string>;
 }
 
 export class StudyError extends Error {
@@ -143,7 +154,13 @@ interface RawStep {
   depth: number;
   title: string;
   sentences: string[];
+  gaps: string[];
   children: RawStep[];
+}
+
+interface Cited {
+  sentences: string[];
+  gaps: string[];
 }
 
 function sentencesOf(block: Block): string[] {
@@ -159,13 +176,45 @@ function sentencesOf(block: Block): string[] {
 }
 
 /**
+ * Note text at the citation, in order. A second citation of the same key adds
+ * nothing: the sentences are already in the outline, and a phone does not
+ * need the paragraph twice.
+ *
+ * A citation whose body is missing stays as a sentence. Dropping it would
+ * hide a hole and look like the chapter had no note.
+ */
+function citations(
+  block: Block,
+  notes: ReadonlyMap<string, string> | undefined,
+  seen: Set<string>,
+): Cited {
+  if (!block.noterefs?.length) return { sentences: [], gaps: [] };
+  const sentences: string[] = [];
+  const gaps: string[] = [];
+  for (const ref of block.noterefs) {
+    if (seen.has(ref.key)) continue;
+    seen.add(ref.key);
+    const text = notes?.get(ref.key)?.replace(/\s+/g, ' ').trim();
+    if (!text) {
+      const label = ref.label.replaceAll('“', "'").replaceAll('”', "'");
+      gaps.push(`Note “${label}” is cited here, and its text is not in the book.`);
+      continue;
+    }
+    const parts = splitSentences(text);
+    sentences.push(...(parts.length > 0 ? parts : [text]));
+  }
+  return { sentences, gaps };
+}
+
+/**
  * No headings: one step per paragraph, consecutive list items gathered into
  * one step. Gathering the list keeps "mark / push / stop" as one move with
  * three points, and every item is still present.
  */
-function headingless(blocks: Block[]): RawStep[] {
+function headingless(blocks: Block[], notes: ReadonlyMap<string, string> | undefined): RawStep[] {
   const steps: RawStep[] = [];
   let list: RawStep | undefined;
+  const seen = new Set<string>();
 
   const closeList = (): void => {
     if (!list) return;
@@ -176,21 +225,24 @@ function headingless(blocks: Block[]): RawStep[] {
   };
 
   for (const block of blocks) {
-    const sentences = sentencesOf(block);
-    if (sentences.length === 0) continue;
+    const cited = citations(block, notes, seen);
+    const sentences = [...sentencesOf(block), ...cited.sentences];
+    if (sentences.length === 0 && cited.gaps.length === 0) continue;
     if (block.tag === 'li') {
       if (!list) {
-        list = { depth: 0, title: '', sentences: [], children: [] };
+        list = { depth: 0, title: '', sentences: [], gaps: [], children: [] };
         steps.push(list);
       }
       list.sentences.push(...sentences);
+      list.gaps.push(...cited.gaps);
       continue;
     }
     closeList();
     steps.push({
       depth: 0,
-      title: sentences[0]!,
+      title: sentences[0] ?? 'Missing note',
       sentences,
+      gaps: cited.gaps,
       children: [],
     });
   }
@@ -202,35 +254,49 @@ function buildRaw(
   blocks: Block[],
   chapter: Chapter,
   boilerplate: ReadonlySet<string> | undefined,
+  notes: ReadonlyMap<string, string> | undefined,
 ): RawStep[] {
   const inChapter: Block[] = [];
   for (let i = chapter.start; i < chapter.end; i++) {
     const block = blocks[i];
     if (!block) continue;
-    if (block.text && isBoilerplate(block.text, boilerplate)) continue;
-    if (!block.text && !block.image) continue;
+    // A running header is not a step. A note hanging off that header still
+    // belongs to the chapter, so the citation is kept and the header text is not.
+    if (block.text && isBoilerplate(block.text, boilerplate)) {
+      if (block.noterefs?.length) inChapter.push({ ...block, text: '', html: '', heading: 0 });
+      continue;
+    }
+    if (!block.text && !block.image && !block.noterefs?.length) continue;
     inChapter.push(block);
   }
 
   const anyHeading = inChapter.some((block) => block.heading > 0 && block.text.length > 0);
-  if (!anyHeading) return headingless(inChapter);
+  if (!anyHeading) return headingless(inChapter, notes);
 
   const roots: RawStep[] = [];
   const stack: RawStep[] = [];
   let opening: RawStep | undefined;
+  const seen = new Set<string>();
 
   const leading = (): RawStep => {
     if (!opening) {
-      opening = { depth: 0, title: 'Opening', sentences: [], children: [] };
+      opening = { depth: 0, title: 'Opening', sentences: [], gaps: [], children: [] };
       roots.unshift(opening);
     }
     return opening;
   };
 
   for (const block of inChapter) {
+    const cited = citations(block, notes, seen);
     if (block.heading > 0 && block.text) {
       while (stack.length > 0 && stack[stack.length - 1]!.depth >= block.heading) stack.pop();
-      const node: RawStep = { depth: block.heading, title: block.text, sentences: [], children: [] };
+      const node: RawStep = {
+        depth: block.heading,
+        title: block.text,
+        sentences: cited.sentences,
+        gaps: cited.gaps,
+        children: [],
+      };
       const parent = stack[stack.length - 1];
       if (parent) parent.children.push(node);
       else roots.push(node);
@@ -239,10 +305,11 @@ function buildRaw(
     }
     const parent = stack[stack.length - 1];
     const target = parent ?? leading();
-    target.sentences.push(...sentencesOf(block));
+    target.sentences.push(...sentencesOf(block), ...cited.sentences);
+    target.gaps.push(...cited.gaps);
   }
 
-  return roots.filter((node) => node.title.length > 0 || node.sentences.length > 0);
+  return roots.filter((node) => node.title.length > 0 || node.sentences.length > 0 || node.gaps.length > 0);
 }
 
 function numberSteps(raws: RawStep[]): OutlineStep[] {
@@ -259,6 +326,7 @@ function numberSteps(raws: RawStep[]): OutlineStep[] {
       whyItMatters: '',
       whySource: 'structure',
       points: raw.sentences.slice(1),
+      gaps: raw.gaps,
       children,
     };
   };
@@ -509,22 +577,35 @@ function buildQuestions(steps: OutlineStep[], ideas: KeyIdea[]): StudyQuestion[]
   return questions;
 }
 
-function chapterWords(blocks: Block[], chapter: Chapter, boilerplate: ReadonlySet<string> | undefined): number {
+function chapterWords(
+  blocks: Block[],
+  chapter: Chapter,
+  boilerplate: ReadonlySet<string> | undefined,
+  notes: ReadonlyMap<string, string> | undefined,
+): number {
   let words = 0;
+  const seen = new Set<string>();
   for (let i = chapter.start; i < chapter.end; i++) {
     const block = blocks[i];
-    if (!block?.text || isBoilerplate(block.text, boilerplate)) continue;
-    words += countWords(block.text);
+    if (!block) continue;
+    // The header is not the chapter. The note it cites can be the whole claim.
+    if (block.text && !isBoilerplate(block.text, boilerplate)) words += countWords(block.text);
+    for (const ref of block.noterefs ?? []) {
+      if (seen.has(ref.key)) continue;
+      seen.add(ref.key);
+      const text = notes?.get(ref.key);
+      if (text) words += countWords(text);
+    }
   }
   return words;
 }
 
 export function buildStudyPack(input: StudyInput): StudyPack {
-  const raw = buildRaw(input.blocks, input.chapter, input.boilerplate);
+  const raw = buildRaw(input.blocks, input.chapter, input.boilerplate, input.notes);
   const outline = numberSteps(raw);
   fillWhy(outline);
   const ideas = selectIdeas(outline, input.blocks, input.chapter, input.boilerplate);
-  const words = chapterWords(input.blocks, input.chapter, input.boilerplate);
+  const words = chapterWords(input.blocks, input.chapter, input.boilerplate, input.notes);
   return {
     bookTitle: input.bookTitle,
     ...(input.author !== undefined ? { author: input.author } : {}),
@@ -622,6 +703,7 @@ export function renderStudyMarkdown(pack: StudyPack): string {
         }
       }
       if (step.points.length > 0) lines.push('');
+      for (const gap of step.gaps) lines.push(mdInline(gap), '');
     }
   }
 
@@ -698,7 +780,7 @@ export function renderStudyHtml(pack: StudyPack): string {
     : [
         headed ? '' : '<p class="note">This chapter has no headings. Each step is one paragraph, in the order it was written.</p>',
         ...flat.map((step) => {
-          const indent = step.depth > 0 ? step.depth - minDepth : 0;
+          const indent = Math.min(5, step.depth > 0 ? Math.max(0, step.depth - minDepth) : 0);
           const placement = whyPlacement(step);
           const lead = step.establishes && step.establishes !== step.title
             ? `<p class="establishes">${escapeHtml(step.establishes)}${
@@ -716,12 +798,14 @@ export function renderStudyHtml(pack: StudyPack): string {
           const why = placement === 'paragraph'
             ? `<p class="why"><span class="label">${escapeHtml(whyLabel(step.whySource))}</span> ${escapeHtml(step.whyItMatters)}</p>`
             : '';
+          const gaps = step.gaps.map((gap) => `<p class="gap">${escapeHtml(gap)}</p>`).join('');
           return [
-            `<article class="step" style="--indent: ${indent}">`,
+            `<article class="step d${indent}">`,
             `<h3><span class="num">${step.step}</span> ${escapeHtml(step.title)}</h3>`,
             lead,
             why,
             points,
+            gaps,
             '</article>',
           ].join('');
         }),
@@ -783,7 +867,13 @@ export function renderStudyHtml(pack: StudyPack): string {
   .intro { margin: 1.25rem 0 0; font-size: 0.95rem; }
   h2 { margin: 2rem 0 0.75rem; font-size: 1.25rem; letter-spacing: -0.016em; }
   .note, .empty { color: #6e6e73; font-size: 0.95rem; }
-  .step { padding-left: calc(var(--indent) * 0.9rem); margin: 0 0 1.15rem; }
+  .step { margin: 0 0 1.15rem; }
+  .d1 { padding-left: 0.9rem; }
+  .d2 { padding-left: 1.8rem; }
+  .d3 { padding-left: 2.7rem; }
+  .d4 { padding-left: 3.6rem; }
+  .d5 { padding-left: 4.5rem; }
+  .gap { margin: 0.45rem 0 0; color: #6e6e73; }
   .step h3 { margin: 0; font-size: 1.05rem; line-height: 1.3; font-weight: 600; }
   .num {
     display: inline-block;
@@ -822,7 +912,7 @@ export function renderStudyHtml(pack: StudyPack): string {
   }
   @media (prefers-color-scheme: dark) {
     body { background: #1d1d1f; color: #f5f5f7; }
-    .eyebrow, .prov, .note, .empty, .num, .label, .kind, .where, details summary { color: #a1a1a6; }
+    .eyebrow, .prov, .note, .empty, .num, .label, .kind, .where, .gap, details summary { color: #a1a1a6; }
     .idea, .question { border-bottom-color: rgba(255, 255, 255, 0.1); }
     details p { background: rgba(255, 255, 255, 0.06); }
   }
@@ -922,6 +1012,7 @@ function inputFor(book: Book, chapter: Chapter, total: number, boilerplate: Read
     blocks: book.blocks,
     totalChapters: total,
     boilerplate,
+    notes: book.notes,
   };
 }
 
@@ -959,7 +1050,7 @@ export function planStudyPacks(book: Book, options: StudyPlanOptions = {}): Stud
   const skipped: SkippedChapter[] = [];
 
   for (const chapter of selected) {
-    const words = chapterWords(book.blocks, chapter, boilerplate);
+    const words = chapterWords(book.blocks, chapter, boilerplate, book.notes);
     // A chapter the user named is written even when it is short. Skipping it
     // after they asked for it would look like a bug.
     if (words < STUDY_WORD_FLOOR && !options.all && !explicit) {
