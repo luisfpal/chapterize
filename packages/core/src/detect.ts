@@ -1,4 +1,15 @@
-import type { Block, BlockIndex, Book, CutPoint, Detection, SpineItem, TocEntry, UnresolvedEntry } from './types.js';
+import type {
+  Block,
+  BlockIndex,
+  Book,
+  CutPoint,
+  CutSource,
+  Detection,
+  SpineItem,
+  TocEntry,
+  UnresolvedEntry,
+} from './types.js';
+import { must } from './must.js';
 
 /**
  * Every strategy returns the same shape: a sorted, deduplicated CutPoint[] that
@@ -40,7 +51,7 @@ function resolve(
   if (entry.fragment === undefined) return { at: start };
 
   for (let i = start; i < blocks.length; i++) {
-    const block = blocks[i]!;
+    const block = must(blocks[i], `block ${i}`);
     if (block.path !== entry.path) break;
     if (block.ids.includes(entry.fragment)) return { at: i };
   }
@@ -52,10 +63,12 @@ function normalise(cuts: CutPoint[], strategy: CutPoint['source']): CutPoint[] {
   const sorted = [...cuts].sort((a, b) => a.at - b.at || a.depth - b.depth);
   const unique: CutPoint[] = [];
   for (const cut of sorted) {
-    if (unique.length && unique[unique.length - 1]!.at === cut.at) continue;
+    const previous = unique[unique.length - 1];
+    if (previous !== undefined && previous.at === cut.at) continue;
     unique.push(cut);
   }
-  if (!unique.length || unique[0]!.at !== 0) {
+  const first = unique[0];
+  if (first === undefined || first.at !== 0) {
     unique.unshift({ at: 0, title: 'Front matter', source: strategy, depth: 0 });
   }
   return unique;
@@ -165,21 +178,28 @@ export function detectFromSpine(book: Book): Detection {
  * Run the fallback chain. A TOC with a single entry is not a table of contents,
  * so it is rejected in favour of headings.
  */
-export function detect(book: Book, strategy?: CutPoint['source']): Detection {
-  if (strategy === 'heading') return detectFromHeadings(book);
-  if (strategy === 'spine') return detectFromSpine(book);
-  if (strategy === 'toc' || strategy === undefined) {
-    // A single TOC entry is not a table of contents. Several entries that all
-    // collapse onto one block aren't either — but the reasons they failed are
-    // still why the fallback ran, and dropping them leaves the UI saying only
-    // "found from headings" with no account of the broken links.
-    const fromToc = book.toc.length > 1 ? detectFromToc(book) : undefined;
-    if (fromToc && fromToc.cuts.length > 1) return fromToc;
-    if (strategy === 'toc') return detectFromToc(book);
-    const unresolved = fromToc?.unresolved ?? [];
-    const fromHeadings = detectFromHeadings(book);
-    if (fromHeadings.cuts.length > 1) return { ...fromHeadings, unresolved };
-    return { ...detectFromSpine(book), unresolved };
+export function detect(book: Book, strategy?: CutSource): Detection {
+  switch (strategy) {
+    case 'heading':
+      return detectFromHeadings(book);
+    case 'spine':
+    case 'manual':
+      // A hand edit already produced the cuts. Asking the detector again is the
+      // same last resort as a book with no table of contents and no headings.
+      return detectFromSpine(book);
+    case 'toc':
+    case undefined: {
+      // A single TOC entry is not a table of contents. Several entries that all
+      // collapse onto one block aren't either — but the reasons they failed are
+      // still why the fallback ran, and dropping them leaves the UI saying only
+      // "found from headings" with no account of the broken links.
+      const fromToc = book.toc.length > 1 ? detectFromToc(book) : undefined;
+      if (fromToc && fromToc.cuts.length > 1) return fromToc;
+      if (strategy === 'toc') return detectFromToc(book);
+      const unresolved = fromToc?.unresolved ?? [];
+      const fromHeadings = detectFromHeadings(book);
+      if (fromHeadings.cuts.length > 1) return { ...fromHeadings, unresolved };
+      return { ...detectFromSpine(book), unresolved };
+    }
   }
-  return detectFromSpine(book);
 }

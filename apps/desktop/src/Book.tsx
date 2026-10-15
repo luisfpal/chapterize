@@ -52,23 +52,32 @@ function runs(html: string, text: string, marks: Annotation[]): Run[] {
   let match: RegExpExecArray | null;
   TAG_RE.lastIndex = 0;
 
+  // Code units, not graphemes. Annotation offsets are indexes into the JS
+  // string, and a segmenter would move them off the characters they name.
   const pushText = (raw: string): void => {
-    for (const ch of decodeEntities(raw)) chars.push({ ch, tags: [...stack] });
+    const decoded = decodeEntities(raw);
+    for (let i = 0; i < decoded.length; i++) {
+      chars.push({ ch: decoded.charAt(i), tags: [...stack] });
+    }
   };
 
   while ((match = TAG_RE.exec(html)) !== null) {
     pushText(html.slice(last, match.index));
+    const tagName = match[2];
+    if (tagName === undefined) continue;
     if (match[1]) stack.pop();
-    else stack.push(match[2]!);
+    else stack.push(tagName);
     last = match.index + match[0].length;
   }
   pushText(html.slice(last));
 
   // Fall back to plain text if the markup and the text ever disagree; offsets
   // must index into exactly what the annotation was recorded against.
-  const source = chars.length === text.length
-    ? chars
-    : [...text].map((ch) => ({ ch, tags: [] as string[] }));
+  const plain = Array.from({ length: text.length }, (_, i) => ({
+    ch: text.charAt(i),
+    tags: [] as string[],
+  }));
+  const source = chars.length === text.length ? chars : plain;
 
   const markAt = (i: number): Annotation | null =>
     marks.find((m) => i >= m.start && i < m.end) ?? null;
@@ -96,15 +105,25 @@ function renderRun(run: Run, key: number) {
     else if (tag === 'noteref') node = <>{node}</>;
     else node = <span>{node}</span>;
   }
-  return run.mark
-    ? <mark key={key} className={`c${run.mark.color}`} title={run.mark.note || undefined}>{node}</mark>
-    : <span key={key}>{node}</span>;
+  return run.mark ? (
+    <mark key={key} className={`c${run.mark.color}`} title={run.mark.note || undefined}>
+      {node}
+    </mark>
+  ) : (
+    <span key={key}>{node}</span>
+  );
 }
 
 function BlockView({
-  block, index, marks, imageUrls, onNote,
+  block,
+  index,
+  marks,
+  imageUrls,
+  onNote,
 }: {
-  block: Block; index: number; marks: Annotation[];
+  block: Block;
+  index: number;
+  marks: Annotation[];
   imageUrls: Map<string, string>;
   onNote: (key: string) => void;
 }) {
@@ -112,9 +131,11 @@ function BlockView({
     const src = imageUrls.get(block.image);
     return (
       <figure data-block={index} className="figure">
-        {src
-          ? <img src={src} alt={block.alt ?? ''} loading="lazy" />
-          : <span className="figure-missing">Figure not found in this book</span>}
+        {src ? (
+          <img src={src} alt={block.alt ?? ''} loading="lazy" />
+        ) : (
+          <span className="figure-missing">Figure not found in this book</span>
+        )}
         {block.alt && <figcaption>{block.alt}</figcaption>}
       </figure>
     );
@@ -125,9 +146,17 @@ function BlockView({
     if (!run.tags.includes('noteref')) return renderRun(run, i);
     const ref = block.noterefs?.[noteSeq++];
     return (
-      <sup key={i} className="noteref" role="button" tabIndex={0}
-           title="Show this footnote"
-           onClick={(e) => { e.stopPropagation(); if (ref) onNote(ref.key); }}>
+      <sup
+        key={i}
+        className="noteref"
+        role="button"
+        tabIndex={0}
+        title="Show this footnote"
+        onClick={(e) => {
+          e.stopPropagation();
+          if (ref) onNote(ref.key);
+        }}
+      >
         {run.text}
       </sup>
     );
@@ -148,7 +177,9 @@ function loadWidths(): { left: number; right: number } {
   try {
     const stored = localStorage.getItem(WIDTH_KEY);
     if (stored) return JSON.parse(stored) as { left: number; right: number };
-  } catch { /* fall through to defaults */ }
+  } catch {
+    /* fall through to defaults */
+  }
   return { left: 288, right: 268 };
 }
 
@@ -156,35 +187,44 @@ function loadWidths(): { left: number; right: number } {
  * Drag handle between panes. Width is committed on every move so the layout
  * tracks the cursor, and persisted so it survives closing the book.
  */
-function Resizer({ side, width, onChange }: {
+function Resizer({
+  side,
+  width,
+  onChange,
+}: {
   side: 'left' | 'right';
   width: number;
   onChange: (next: number) => void;
 }) {
-  const start = useCallback((event: React.MouseEvent) => {
-    event.preventDefault();
-    const originX = event.clientX;
-    const originWidth = width;
-    const [min, max] = LIMITS[side];
+  const start = useCallback(
+    (event: React.MouseEvent) => {
+      event.preventDefault();
+      const originX = event.clientX;
+      const originWidth = width;
+      const [min, max] = LIMITS[side];
 
-    const move = (e: MouseEvent): void => {
-      const delta = side === 'left' ? e.clientX - originX : originX - e.clientX;
-      onChange(Math.max(min, Math.min(max, originWidth + delta)));
-    };
-    const stop = (): void => {
-      window.removeEventListener('mousemove', move);
-      window.removeEventListener('mouseup', stop);
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-    };
-    // Suppress selection while dragging, or the reader text highlights instead.
-    document.body.style.cursor = 'col-resize';
-    document.body.style.userSelect = 'none';
-    window.addEventListener('mousemove', move);
-    window.addEventListener('mouseup', stop);
-  }, [onChange, side, width]);
+      const move = (e: MouseEvent): void => {
+        const delta = side === 'left' ? e.clientX - originX : originX - e.clientX;
+        onChange(Math.max(min, Math.min(max, originWidth + delta)));
+      };
+      const stop = (): void => {
+        window.removeEventListener('mousemove', move);
+        window.removeEventListener('mouseup', stop);
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+      };
+      // Suppress selection while dragging, or the reader text highlights instead.
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+      window.addEventListener('mousemove', move);
+      window.addEventListener('mouseup', stop);
+    },
+    [onChange, side, width],
+  );
 
-  return <div className="resizer" onMouseDown={start} role="separator" aria-orientation="vertical" />;
+  return (
+    <div className="resizer" onMouseDown={start} role="separator" aria-orientation="vertical" />
+  );
 }
 
 interface Props {
@@ -202,7 +242,9 @@ export function BookView({ book, onBack, onExport }: Props) {
   const [size, setSize] = useState(18);
   const [widths, setWidths] = useState(loadWidths);
   const [tab, setTab] = useState<'notes' | 'analysis' | 'search'>('notes');
-  const [lookup, setLookup] = useState<{ word: string; defs: Definition[]; error: string } | null>(null);
+  const [lookup, setLookup] = useState<{ word: string; defs: Definition[]; error: string } | null>(
+    null,
+  );
   const [exporting, setExporting] = useState(false);
   const [editing, setEditing] = useState(false);
   const [cuts, setCuts] = useState<CutPoint[] | null>(null);
@@ -244,15 +286,21 @@ export function BookView({ book, onBack, onExport }: Props) {
     });
   }, []);
 
-  const save = useCallback(async (next: Annotation[]) => {
-    setAnnotations(next);
-    await native.writeText(`${book.dir}/annotations.json`, JSON.stringify(next, null, 2));
-  }, [book.dir]);
+  const save = useCallback(
+    async (next: Annotation[]) => {
+      setAnnotations(next);
+      await native.writeText(`${book.dir}/annotations.json`, JSON.stringify(next, null, 2));
+    },
+    [book.dir],
+  );
 
-  const saveIndex = useCallback(async (next: BookIndex) => {
-    setIndex(next);
-    await native.writeText(`${book.dir}/index.json`, JSON.stringify(next, null, 2));
-  }, [book.dir]);
+  const saveIndex = useCallback(
+    async (next: BookIndex) => {
+      setIndex(next);
+      await native.writeText(`${book.dir}/index.json`, JSON.stringify(next, null, 2));
+    },
+    [book.dir],
+  );
 
   const say = useCallback((message: string) => {
     setFlash(message);
@@ -295,15 +343,17 @@ export function BookView({ book, onBack, onExport }: Props) {
       }, 800);
     };
     pane.addEventListener('scroll', onScroll, { passive: true });
-    return () => { pane.removeEventListener('scroll', onScroll); window.clearTimeout(timer); };
+    return () => {
+      pane.removeEventListener('scroll', onScroll);
+      window.clearTimeout(timer);
+    };
   }, [book.dir, current, editing]);
 
   /* ── annotations ─────────────────────────────────────────────────── */
 
   const chapterAnnotations = useMemo(
-    () => chapter
-      ? annotations.filter((a) => a.block >= chapter.start && a.block < chapter.end)
-      : [],
+    () =>
+      chapter ? annotations.filter((a) => a.block >= chapter.start && a.block < chapter.end) : [],
     [annotations, chapter],
   );
   const byBlock = useMemo(() => {
@@ -321,7 +371,9 @@ export function BookView({ book, onBack, onExport }: Props) {
     const selection = window.getSelection();
     if (!selection || selection.isCollapsed) return;
     const anchor = selection.anchorNode;
-    const host = (anchor instanceof Element ? anchor : anchor?.parentElement)?.closest('[data-block]');
+    const host = (anchor instanceof Element ? anchor : anchor?.parentElement)?.closest(
+      '[data-block]',
+    );
     if (!host) return;
     const blockIndex = Number(host.getAttribute('data-block'));
     // The quote has to be the block's own text. selection.toString() trims,
@@ -339,27 +391,38 @@ export function BookView({ book, onBack, onExport }: Props) {
     setPending({
       id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
       block: blockIndex,
-      start: span.start, end: span.end, quote: span.quote,
-      color: 1, createdAt: new Date().toISOString(),
+      start: span.start,
+      end: span.end,
+      quote: span.quote,
+      color: 1,
+      createdAt: new Date().toISOString(),
     });
     setDraft('');
     setTab('notes');
   }, [book.blocks, editing]);
 
-  const commit = useCallback(async (color: Annotation['color']) => {
-    if (!pending) return;
-    await save([...annotations, { ...pending, color, note: draft.trim() }]);
-    setPending(null);
-    setDraft('');
-    window.getSelection()?.removeAllRanges();
-  }, [annotations, draft, pending, save]);
+  const commit = useCallback(
+    async (color: Annotation['color']) => {
+      if (!pending) return;
+      await save([...annotations, { ...pending, color, note: draft.trim() }]);
+      setPending(null);
+      setDraft('');
+      window.getSelection()?.removeAllRanges();
+    },
+    [annotations, draft, pending, save],
+  );
 
   /* ── split editing ───────────────────────────────────────────────── */
 
   const enterEdit = useCallback(() => {
-    setCuts(index.chapters.map((c) => ({
-      at: c.start, title: c.title, source: 'manual' as const, depth: 0,
-    })));
+    setCuts(
+      index.chapters.map((c) => ({
+        at: c.start,
+        title: c.title,
+        source: 'manual' as const,
+        depth: 0,
+      })),
+    );
     setHistory([]);
     setEditing(true);
   }, [index.chapters]);
@@ -396,10 +459,13 @@ export function BookView({ book, onBack, onExport }: Props) {
 
   /* ── paths for agents ────────────────────────────────────────────── */
 
-  const copy = useCallback(async (value: string, label: string) => {
-    await copyToClipboard(value);
-    say(`Copied ${label}`);
-  }, [say]);
+  const copy = useCallback(
+    async (value: string, label: string) => {
+      await copyToClipboard(value);
+      say(`Copied ${label}`);
+    },
+    [say],
+  );
 
   const agentPrompt = useCallback(() => {
     if (!chapter) return '';
@@ -415,13 +481,17 @@ export function BookView({ book, onBack, onExport }: Props) {
 
   /* ── keyboard ────────────────────────────────────────────────────── */
 
-  const go = useCallback((delta: number) => {
-    setCurrent((c) => Math.min(index.chapters.length - 1, Math.max(0, c + delta)));
-  }, [index.chapters.length]);
+  const go = useCallback(
+    (delta: number) => {
+      setCurrent((c) => Math.min(index.chapters.length - 1, Math.max(0, c + delta)));
+    },
+    [index.chapters.length],
+  );
 
   const toggleFinished = useCallback(async () => {
     const set = new Set(index.finished);
-    if (set.has(current)) set.delete(current); else set.add(current);
+    if (set.has(current)) set.delete(current);
+    else set.add(current);
     await saveIndex({ ...index, finished: [...set].sort((a, b) => a - b) });
   }, [current, index, saveIndex]);
 
@@ -441,7 +511,10 @@ export function BookView({ book, onBack, onExport }: Props) {
         case 'scroll': readerRef.current?.scrollBy({ top: command.delta }); break;
         case 'highlight': capture(); break;
         case 'mark-read': void toggleFinished(); break;
-        case 'toggle-edit': editing ? setEditing(false) : enterEdit(); break;
+        case 'toggle-edit':
+          if (editing) setEditing(false);
+          else enterEdit();
+          break;
         case 'search': e.preventDefault(); setTab('search'); break;
         case 'undo-edit': undo(); break;
         case 'close-lookup': setLookup(null); break;
@@ -464,41 +537,79 @@ export function BookView({ book, onBack, onExport }: Props) {
 
   // One shape for the list whichever mode is active, so the row does not have to
   // discriminate a union while rendering.
-  const rows: { title: string; detail: string }[] = editing && cuts
-    ? cuts.map((c) => ({ title: c.title, detail: `block ${c.at}` }))
-    : index.chapters.map((c) => ({ title: c.title, detail: `~${readingMinutes(c.words)} min` }));
+  const rows: { title: string; detail: string }[] =
+    editing && cuts
+      ? cuts.map((c) => ({ title: c.title, detail: `block ${c.at}` }))
+      : index.chapters.map((c) => ({ title: c.title, detail: `~${readingMinutes(c.words)} min` }));
 
   return (
     <>
       <div className="topbar">
-        <button className="btn ghost" onClick={onBack} title="Back to library (Esc)">←</button>
+        <button className="btn ghost" onClick={onBack} title="Back to library (Esc)">
+          ←
+        </button>
         <h1>{index.title}</h1>
         <span className="sub">{index.author}</span>
         <span className="spacer" />
         {flash && <span className="sub flash">{flash}</span>}
         {editing ? (
           <>
-            <button className="btn ghost" disabled={!history.length} onClick={undo} title="Undo (u)">Undo</button>
-            <button className="btn" onClick={() => { setEditing(false); setCuts(null); }}>Cancel</button>
-            <button className="btn primary" onClick={() => void commitSplit()}>Save split</button>
+            <button
+              className="btn ghost"
+              disabled={!history.length}
+              onClick={undo}
+              title="Undo (u)"
+            >
+              Undo
+            </button>
+            <button
+              className="btn"
+              onClick={() => {
+                setEditing(false);
+                setCuts(null);
+              }}
+            >
+              Cancel
+            </button>
+            <button className="btn primary" onClick={() => void commitSplit()}>
+              Save split
+            </button>
           </>
         ) : (
           <>
             {speech.available && (
-              <button className="btn ghost" title={speech.speaking ? 'Stop reading aloud' : 'Read this chapter aloud'}
-                      onClick={() => void (speech.speaking
-                        ? speech.stop()
-                        : speech.start(
-                            book.blocks.slice(chapter.start, chapter.end)
-                              .map((b) => b.text).filter((t) => t.length > 1).join('. '),
-                          ).then((err) => { if (err) say(err); }))}>
+              <button
+                className="btn ghost"
+                title={speech.speaking ? 'Stop reading aloud' : 'Read this chapter aloud'}
+                onClick={() =>
+                  void (speech.speaking
+                    ? speech.stop()
+                    : speech.start(
+                        book.blocks
+                          .slice(chapter.start, chapter.end)
+                          .map((b) => b.text)
+                          .filter((t) => t.length > 1)
+                          .join('. '),
+                      ).then((err) => {
+                        if (err) say(err);
+                      }))
+                }
+              >
                 {speech.speaking ? '■ Stop' : '▶ Listen'}
               </button>
             )}
-            <button className="btn ghost" onClick={() => setSize((v) => Math.max(13, v - 1))}>A−</button>
-            <button className="btn ghost" onClick={() => setSize((v) => Math.min(26, v + 1))}>A+</button>
-            <button className="btn" onClick={enterEdit} title="Edit chapter boundaries (e)">Edit split</button>
-            <button className="btn primary" onClick={() => setExporting(true)}>Export…</button>
+            <button className="btn ghost" onClick={() => setSize((v) => Math.max(13, v - 1))}>
+              A−
+            </button>
+            <button className="btn ghost" onClick={() => setSize((v) => Math.min(26, v + 1))}>
+              A+
+            </button>
+            <button className="btn" onClick={enterEdit} title="Edit chapter boundaries (e)">
+              Edit split
+            </button>
+            <button className="btn primary" onClick={() => setExporting(true)}>
+              Export…
+            </button>
           </>
         )}
       </div>
@@ -506,8 +617,11 @@ export function BookView({ book, onBack, onExport }: Props) {
       <div className="panes">
         <div className="pane left" style={{ flexBasis: widths.left }}>
           <div className="pane-head">
-            Chapters<span className="spacer" />
-            {editing ? `${cuts?.length ?? 0} after edit` : `${index.finished.length}/${index.chapters.length} read`}
+            Chapters
+            <span className="spacer" />
+            {editing
+              ? `${cuts?.length ?? 0} after edit`
+              : `${index.finished.length}/${index.chapters.length} read`}
           </div>
           <div className="pane-body">
             {rows.map((c, i) => (
@@ -526,13 +640,23 @@ export function BookView({ book, onBack, onExport }: Props) {
                 </button>
                 {editing && i > 0 && cuts && (
                   <div className="chapter-tools">
-                    <button className="btn ghost tiny" title="Merge into the chapter above (m)"
-                            onClick={() => apply(mergeUp(cuts, i))}>Merge up</button>
-                    <button className="btn ghost tiny" title="Rename"
-                            onClick={() => {
-                              const name = window.prompt('Chapter title', c.title);
-                              if (name !== null) apply(retitle(cuts, i, name.trim() || c.title));
-                            }}>Rename</button>
+                    <button
+                      className="btn ghost tiny"
+                      title="Merge into the chapter above (m)"
+                      onClick={() => apply(mergeUp(cuts, i))}
+                    >
+                      Merge up
+                    </button>
+                    <button
+                      className="btn ghost tiny"
+                      title="Rename"
+                      onClick={() => {
+                        const name = window.prompt('Chapter title', c.title);
+                        if (name !== null) apply(retitle(cuts, i, name.trim() || c.title));
+                      }}
+                    >
+                      Rename
+                    </button>
                   </div>
                 )}
               </div>
@@ -543,14 +667,18 @@ export function BookView({ book, onBack, onExport }: Props) {
         <Resizer side="left" width={widths.left} onChange={(n) => setPane('left', n)} />
 
         <div className="pane center">
-          <div className="pane-body" ref={readerRef} onMouseUp={capture}
-               onDoubleClick={() => void onDoubleClick()}>
+          <div
+            className="pane-body"
+            ref={readerRef}
+            onMouseUp={capture}
+            onDoubleClick={() => void onDoubleClick()}
+          >
             <div className="reader" style={{ ['--reader-size' as string]: `${size}px` }}>
               <div className="reader-title">
                 <h2>{chapter.title}</h2>
                 <div className="prov">
-                  {chapter.index + 1} of {index.chapters.length} in reading order ·
-                  {' '}~{readingMinutes(chapter.words)} min read
+                  {chapter.index + 1} of {index.chapters.length} in reading order · ~
+                  {readingMinutes(chapter.words)} min read
                 </div>
               </div>
               <div className={`reader-col${editing ? ' editing' : ''}`}>
@@ -559,16 +687,22 @@ export function BookView({ book, onBack, onExport }: Props) {
                   return (
                     <div key={at}>
                       {editing && cuts && i > 0 && (
-                        <button className="cutter" title={`Start a new chapter here (block ${at})`}
-                                onClick={() => apply(splitAt(cuts, at, 'Untitled'))}>
+                        <button
+                          className="cutter"
+                          title={`Start a new chapter here (block ${at})`}
+                          onClick={() => apply(splitAt(cuts, at, 'Untitled'))}
+                        >
                           <span>split here</span>
                         </button>
                       )}
                       <BlockView
-                        block={b} index={at}
+                        block={b}
+                        index={at}
                         marks={byBlock.get(at) ?? []}
                         imageUrls={book.imageUrls}
-                        onNote={(key) => setNote({ key, text: book.notes.get(key) ?? 'Note not found.' })}
+                        onNote={(key) =>
+                          setNote({ key, text: book.notes.get(key) ?? 'Note not found.' })
+                        }
                       />
                     </div>
                   );
@@ -605,17 +739,27 @@ export function BookView({ book, onBack, onExport }: Props) {
                 <div className="field">
                   <label>New highlight</label>
                   <div className="quote">{pending.quote}</div>
-                  <textarea autoFocus placeholder="Why does this matter? (optional)"
-                            value={draft} onChange={(e) => setDraft(e.target.value)}
-                            style={{ marginTop: 8 }} />
+                  <textarea
+                    autoFocus
+                    placeholder="Why does this matter? (optional)"
+                    value={draft}
+                    onChange={(e) => setDraft(e.target.value)}
+                    style={{ marginTop: 8 }}
+                  />
                   <div className="row" style={{ marginTop: 8 }}>
                     {COLORS.map((c) => (
-                      <button key={c} className="btn" title={`Save with colour ${c}`}
-                              onClick={() => void commit(c)}
-                              style={{ background: `var(--hl-${c})`, width: 30, height: 26 }} />
+                      <button
+                        key={c}
+                        className="btn"
+                        title={`Save with colour ${c}`}
+                        onClick={() => void commit(c)}
+                        style={{ background: `var(--hl-${c})`, width: 30, height: 26 }}
+                      />
                     ))}
                     <span className="spacer" />
-                    <button className="btn ghost" onClick={() => setPending(null)}>Cancel</button>
+                    <button className="btn ghost" onClick={() => setPending(null)}>
+                      Cancel
+                    </button>
                   </div>
                 </div>
               )}
@@ -623,9 +767,15 @@ export function BookView({ book, onBack, onExport }: Props) {
                 <div className="empty">Select text in the chapter to highlight it.</div>
               )}
               {chapterAnnotations.map((a) => (
-                <div key={a.id} className="note" title="Click to delete"
-                     onClick={() => void save(annotations.filter((x) => x.id !== a.id))}>
-                  <div className="quote" style={{ borderLeftColor: `var(--hl-${a.color})` }}>{a.quote}</div>
+                <div
+                  key={a.id}
+                  className="note"
+                  title="Click to delete"
+                  onClick={() => void save(annotations.filter((x) => x.id !== a.id))}
+                >
+                  <div className="quote" style={{ borderLeftColor: `var(--hl-${a.color})` }}>
+                    {a.quote}
+                  </div>
                   {a.note && <div className="body">{a.note}</div>}
                 </div>
               ))}
@@ -636,11 +786,17 @@ export function BookView({ book, onBack, onExport }: Props) {
 
       <div className="pathbar">
         <span className="label">For your agents</span>
-        <button className="btn tiny" title="Puts the book, chapter, and both folder paths on the clipboard"
-                onClick={() => void copy(agentPrompt(), 'a ready prompt')}>
+        <button
+          className="btn tiny"
+          title="Puts the book, chapter, and both folder paths on the clipboard"
+          onClick={() => void copy(agentPrompt(), 'a ready prompt')}
+        >
           Copy for agent
         </button>
-        <button className="btn ghost tiny" onClick={() => void revealItemInDir(`${book.dir}/index.json`)}>
+        <button
+          className="btn ghost tiny"
+          onClick={() => void revealItemInDir(`${book.dir}/index.json`)}
+        >
           Open folder
         </button>
         <span className="spacer" />
@@ -648,30 +804,80 @@ export function BookView({ book, onBack, onExport }: Props) {
       </div>
 
       <div className="keys">
-        <span><kbd>j</kbd><kbd>k</kbd> scroll</span>
-        <span><kbd>n</kbd><kbd>p</kbd> chapter</span>
-        {editing
-          ? <><span><kbd>u</kbd> undo</span><span><kbd>e</kbd> leave edit</span></>
-          : <><span><kbd>h</kbd> highlight</span><span><kbd>m</kbd> mark read</span><span><kbd>e</kbd> edit split</span></>}
-        <span><kbd>/</kbd> find</span>
+        <span>
+          <kbd>j</kbd>
+          <kbd>k</kbd> scroll
+        </span>
+        <span>
+          <kbd>n</kbd>
+          <kbd>p</kbd> chapter
+        </span>
+        {editing ? (
+          <>
+            <span>
+              <kbd>u</kbd> undo
+            </span>
+            <span>
+              <kbd>e</kbd> leave edit
+            </span>
+          </>
+        ) : (
+          <>
+            <span>
+              <kbd>h</kbd> highlight
+            </span>
+            <span>
+              <kbd>m</kbd> mark read
+            </span>
+            <span>
+              <kbd>e</kbd> edit split
+            </span>
+          </>
+        )}
+        <span>
+          <kbd>/</kbd> find
+        </span>
         <span>double-click a word to define it</span>
-        <span><kbd>−</kbd><kbd>+</kbd> size</span>
-        <span><kbd>Esc</kbd> back</span>
+        <span>
+          <kbd>−</kbd>
+          <kbd>+</kbd> size
+        </span>
+        <span>
+          <kbd>Esc</kbd> back
+        </span>
       </div>
 
       {exporting && (
         <div className="note-popup" role="dialog" onClick={() => setExporting(false)}>
           <div className="note-popup-inner" onClick={(e) => e.stopPropagation()}>
-            <div className="pane-head">Export as Markdown<span className="spacer" />
-              <button className="btn ghost tiny" onClick={() => setExporting(false)}>Close</button>
+            <div className="pane-head">
+              Export as Markdown
+              <span className="spacer" />
+              <button className="btn ghost tiny" onClick={() => setExporting(false)}>
+                Close
+              </button>
             </div>
             <div className="define">
-              <p className="hint">Writes files to a folder you choose, with your highlights appended.</p>
+              <p className="hint">
+                Writes files to a folder you choose, with your highlights appended.
+              </p>
               <div className="row">
-                <button className="btn" onClick={() => { setExporting(false); onExport(current); }}>
+                <button
+                  className="btn"
+                  onClick={() => {
+                    setExporting(false);
+                    onExport(current);
+                  }}
+                >
                   This chapter
                 </button>
-                <button className="btn primary" onClick={() => { setExporting(false); onExport('all'); }}>
+                <button
+                  className="btn primary"
+                  onClick={() => {
+                    setExporting(false);
+                    onExport('all');
+                  }}
+                >
                   All {index.chapters.length} chapters
                 </button>
               </div>
@@ -684,14 +890,19 @@ export function BookView({ book, onBack, onExport }: Props) {
         <div className="note-popup" role="dialog" onClick={() => setLookup(null)}>
           <div className="note-popup-inner" onClick={(e) => e.stopPropagation()}>
             <div className="pane-head">
-              {lookup.word}<span className="spacer" />
-              <button className="btn ghost tiny" onClick={() => setLookup(null)}>Close</button>
+              {lookup.word}
+              <span className="spacer" />
+              <button className="btn ghost tiny" onClick={() => setLookup(null)}>
+                Close
+              </button>
             </div>
             <div className="define">
               {lookup.error && <p className="hint">{lookup.error}</p>}
               {!lookup.error && !lookup.defs.length && <p className="hint">Looking up…</p>}
               {lookup.defs.map((d, i) => (
-                <p key={i}><em>{d.partOfSpeech}</em> {d.sense}</p>
+                <p key={i}>
+                  <em>{d.partOfSpeech}</em> {d.sense}
+                </p>
               ))}
             </div>
           </div>
@@ -701,8 +912,12 @@ export function BookView({ book, onBack, onExport }: Props) {
       {note && (
         <div className="note-popup" role="dialog" onClick={() => setNote(null)}>
           <div className="note-popup-inner" onClick={(e) => e.stopPropagation()}>
-            <div className="pane-head">Footnote<span className="spacer" />
-              <button className="btn ghost tiny" onClick={() => setNote(null)}>Close</button>
+            <div className="pane-head">
+              Footnote
+              <span className="spacer" />
+              <button className="btn ghost tiny" onClick={() => setNote(null)}>
+                Close
+              </button>
             </div>
             <p>{note.text}</p>
           </div>

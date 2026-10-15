@@ -1,6 +1,7 @@
-import { unzipSync } from 'fflate';
+import { isText } from 'domhandler';
 import type { AnyNode, Document, Element } from 'domhandler';
-import type { Block, Book, BookMetadata, NoteRef, SpineItem, TocEntry } from './types.js';
+import { unzipSync } from 'fflate';
+import type { Block, Book, BookMetadata, HeadingLevel, NoteRef, SpineItem, TocEntry } from './types.js';
 import { attr, children, findAll, findFirst, isElement, parseHtml, parseXml, textOf } from './xml.js';
 
 const CONTAINER = 'META-INF/container.xml';
@@ -558,8 +559,8 @@ function escapeHtml(s: string): string {
 function serializeNodes(nodes: AnyNode[]): string {
   let out = '';
   const walk = (n: AnyNode): void => {
-    if (n.type === 'text') {
-      out += escapeHtml((n as unknown as { data: string }).data);
+    if (isText(n)) {
+      out += escapeHtml(n.data);
       return;
     }
     if (!isElement(n)) return;
@@ -759,6 +760,19 @@ interface NoteHit {
   text: string;
 }
 
+/** h1–h6, or 0. A tag outside that set is not a heading, whatever its name. */
+function headingLevel(tag: string): HeadingLevel {
+  switch (tag) {
+    case 'h1': return 1;
+    case 'h2': return 2;
+    case 'h3': return 3;
+    case 'h4': return 4;
+    case 'h5': return 5;
+    case 'h6': return 6;
+    default: return 0;
+  }
+}
+
 function blockFrom(
   spineIndex: number,
   path: string,
@@ -770,13 +784,12 @@ function blockFrom(
   noterefs: NoteRef[],
 ): Block | undefined {
   if (!text && !ids.length && !image.src) return undefined;
-  const headingMatch = /^h([1-6])$/.exec(tag);
   return {
     spineIndex,
     path,
     ids,
     tag,
-    heading: headingMatch ? Number(headingMatch[1]) : 0,
+    heading: headingLevel(tag),
     text,
     html,
     ...(image.src !== undefined ? { image: image.src } : {}),
@@ -916,7 +929,7 @@ function collectBlocks(
     emitExtras(images);
   };
 
-  const walk = (node: Element, inherited?: string): void => {
+  const walk = (node: Element | Document, inherited?: string): void => {
     let inline: AnyNode[] = [];
     const flush = (): void => {
       const nodes = inline;
@@ -979,7 +992,7 @@ function collectBlocks(
     walk(body);
   } else {
     // No <body>: walk the document's children. `walk` only reads `children`.
-    walk(doc as unknown as Element);
+    walk(doc);
   }
 
   if (pendingIds.length && blocks.length) {

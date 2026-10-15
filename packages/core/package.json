@@ -9,6 +9,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "domelementtype": "^2.3.0",
+    "domhandler": "^5.0.3",
     "fflate": "^0.8.2",
     "htmlparser2": "^10.0.0"
   },

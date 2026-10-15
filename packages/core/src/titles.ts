@@ -1,4 +1,5 @@
 import type { Block, Chapter } from './types.js';
+import { must } from './must.js';
 
 /**
  * Deriving a usable chapter title is harder than reading the first heading, and
@@ -53,7 +54,7 @@ export function findBoilerplate(chapters: Chapter[], blocks: Block[]): Set<strin
   for (const ch of chapters) {
     const seen = new Set<string>();
     for (let i = ch.start; i < Math.min(ch.end, ch.start + LOOKAHEAD); i++) {
-      const key = normalise(blocks[i]!.text);
+      const key = normalise(must(blocks[i], `block ${i}`).text);
       if (key) seen.add(key);
     }
     for (const key of seen) counts.set(key, (counts.get(key) ?? 0) + 1);
@@ -69,16 +70,12 @@ export function findBoilerplate(chapters: Chapter[], blocks: Block[]): Set<strin
  * "Chapter 3"), because "Law 7 — Get Others to Do the Work for You" is more
  * useful in a file list than either half alone.
  */
-export function deriveTitle(
-  chapter: Chapter,
-  blocks: Block[],
-  boilerplate: Set<string>,
-): string {
+export function deriveTitle(chapter: Chapter, blocks: Block[], boilerplate: Set<string>): string {
   const label = chapter.title.trim();
   const parts: string[] = [];
 
   for (let i = chapter.start; i < Math.min(chapter.end, chapter.start + LOOKAHEAD); i++) {
-    const text = blocks[i]!.text.trim();
+    const text = must(blocks[i], `block ${i}`).text.trim();
     const key = normalise(text);
     if (!text || boilerplate.has(key) || key === normalise(label)) {
       if (parts.length) break;
@@ -128,12 +125,35 @@ function titleCase(s: string): string {
   const upper = letters.replace(/[^A-Z]/g, '').length;
   if (!letters.length || upper / letters.length < 0.8) return s;
 
-  const minor = new Set(['a', 'an', 'and', 'as', 'at', 'but', 'by', 'for', 'in',
-    'nor', 'of', 'on', 'or', 'the', 'to', 'up', 'with', 'is', 'it']);
-  return s.toLowerCase().split(' ').map((word, i, all) => {
-    if (i > 0 && i < all.length - 1 && minor.has(word)) return word;
-    return word.charAt(0).toUpperCase() + word.slice(1);
-  }).join(' ');
+  const minor = new Set([
+    'a',
+    'an',
+    'and',
+    'as',
+    'at',
+    'but',
+    'by',
+    'for',
+    'in',
+    'nor',
+    'of',
+    'on',
+    'or',
+    'the',
+    'to',
+    'up',
+    'with',
+    'is',
+    'it',
+  ]);
+  return s
+    .toLowerCase()
+    .split(' ')
+    .map((word, i, all) => {
+      if (i > 0 && i < all.length - 1 && minor.has(word)) return word;
+      return word.charAt(0).toUpperCase() + word.slice(1);
+    })
+    .join(' ');
 }
 
 /** Apply title derivation across a whole book in one pass. */

@@ -6,6 +6,8 @@ import { detect, detectFromToc } from '../src/detect.js';
 import { toChapters, limitCount, mergeSmall, mergeStubs } from '../src/chapters.js';
 import { deriveTitles } from '../src/titles.js';
 import { inlineMarkdown, renderChapter, countWords, readingMinutes } from '../src/markdown.js';
+import { must } from '../src/must.js';
+import { attr, findAll, parseXml } from '../src/xml.js';
 import { allBooks, lazyBook, libraryAvailable, loadBook } from './fixtures.js';
 
 /**
@@ -32,6 +34,16 @@ describe('resolvePath', () => {
   });
 });
 
+describe('findAll', () => {
+  it('returns elements in document order, not sorted by id', () => {
+    // The spine is this list. A reversed walk, or a sort, would rename every chapter.
+    const doc = parseXml(
+      '<spine><itemref idref="b"/><itemref idref="a"/><itemref idref="c"/></spine>',
+    );
+    expect(findAll(doc, 'itemref').map((el) => attr(el, 'idref'))).toEqual(['b', 'a', 'c']);
+  });
+});
+
 describeShelf('real library', () => {
   it('opens every book without throwing', () => {
     for (const path of allBooks()) {
@@ -53,10 +65,14 @@ describeShelf('real library', () => {
     for (const path of allBooks()) {
       const book = openEpub(new Uint8Array(readFileSync(path)));
       const chapters = toChapters(detect(book).cuts, book.blocks);
-      expect(chapters[0]!.start, basename(path)).toBe(0);
-      expect(chapters[chapters.length - 1]!.end, basename(path)).toBe(book.blocks.length);
+      expect(must(chapters[0], 'first chapter').start, basename(path)).toBe(0);
+      expect(must(chapters[chapters.length - 1], 'last chapter').end, basename(path)).toBe(
+        book.blocks.length,
+      );
       for (let i = 1; i < chapters.length; i++) {
-        expect(chapters[i]!.start, basename(path)).toBe(chapters[i - 1]!.end);
+        expect(must(chapters[i], `chapter ${i}`).start, basename(path)).toBe(
+          must(chapters[i - 1], `chapter ${i - 1}`).end,
+        );
       }
     }
   });
@@ -66,49 +82,50 @@ describeShelf('The 48 Laws of Power — EPUB 2, NCX, one file per chapter', () =
   const load = lazyBook('Laws of Power');
   const open = () => openEpub(load());
 
-  it('reads EPUB 2 metadata and the NCX table of contents', () => {
-    const book = open();
-    expect(book.metadata.epubVersion).toBe('2.0');
-    expect(book.tocSource).toBe('ncx');
-    expect(book.metadata.title).toContain('48 Laws of Power');
-    expect(book.spine.length).toBe(53);
-  });
+    it('reads EPUB 2 metadata and the NCX table of contents', () => {
+      const book = open();
+      expect(book.metadata.epubVersion).toBe('2.0');
+      expect(book.tocSource).toBe('ncx');
+      expect(book.metadata.title).toContain('48 Laws of Power');
+      expect(book.spine.length).toBe(53);
+    });
 
-  it('detects roughly one chapter per law', () => {
-    const book = open();
-    const { cuts, unresolved } = detectFromToc(book);
-    expect(cuts.length).toBeGreaterThanOrEqual(50);
-    expect(unresolved).toHaveLength(0);
-  });
+    it('detects roughly one chapter per law', () => {
+      const book = open();
+      const { cuts, unresolved } = detectFromToc(book);
+      expect(cuts.length).toBeGreaterThanOrEqual(50);
+      expect(unresolved).toHaveLength(0);
+    });
 
-  it('recovers the real law titles that live in no heading', () => {
-    const book = open();
-    const chapters = deriveTitles(toChapters(detect(book).cuts, book.blocks), book.blocks);
-    const titles = chapters.map((c) => c.title).join('\n');
-    expect(titles).toMatch(/Never Outshine the Master/i);
-    expect(titles).toMatch(/Conceal Your Intentions/i);
-  });
+    it('recovers the real law titles that live in no heading', () => {
+      const book = open();
+      const chapters = deriveTitles(toChapters(detect(book).cuts, book.blocks), book.blocks);
+      const titles = chapters.map((c) => c.title).join('\n');
+      expect(titles).toMatch(/Never Outshine the Master/i);
+      expect(titles).toMatch(/Conceal Your Intentions/i);
+    });
 
-  it('does not name every chapter after the book, which the raw h1 would', () => {
-    const book = open();
-    const chapters = deriveTitles(toChapters(detect(book).cuts, book.blocks), book.blocks);
-    const named = chapters.filter((c) => /^48 Laws of Power$/i.test(c.title));
-    // The h1 "48 Laws of Power" repeats in all 51 chapters, so boilerplate
-    // suppression must stop it becoming their titles. The book's own table of
-    // contents does label its title page that way, and echoing the source there
-    // is correct — so one is expected, and more than one is the bug.
-    expect(named.length).toBeLessThanOrEqual(1);
-    const unique = new Set(chapters.map((c) => c.title.toLowerCase()));
-    expect(unique.size).toBeGreaterThan(chapters.length - 3);
-  });
+    it('does not name every chapter after the book, which the raw h1 would', () => {
+      const book = open();
+      const chapters = deriveTitles(toChapters(detect(book).cuts, book.blocks), book.blocks);
+      const named = chapters.filter((c) => /^48 Laws of Power$/i.test(c.title));
+      // The h1 "48 Laws of Power" repeats in all 51 chapters, so boilerplate
+      // suppression must stop it becoming their titles. The book's own table of
+      // contents does label its title page that way, and echoing the source there
+      // is correct — so one is expected, and more than one is the bug.
+      expect(named.length).toBeLessThanOrEqual(1);
+      const unique = new Set(chapters.map((c) => c.title.toLowerCase()));
+      expect(unique.size).toBeGreaterThan(chapters.length - 3);
+    });
 
-  it('joins a display title split across several elements', () => {
-    const book = open();
-    const chapters = deriveTitles(toChapters(detect(book).cuts, book.blocks), book.blocks);
-    const law7 = chapters.find((c) => /LAW 7\b/i.test(c.title));
-    expect(law7?.title).toMatch(/Get Others to Do the Work/i);
-  });
-});
+    it('joins a display title split across several elements', () => {
+      const book = open();
+      const chapters = deriveTitles(toChapters(detect(book).cuts, book.blocks), book.blocks);
+      const law7 = chapters.find((c) => /LAW 7\b/i.test(c.title));
+      expect(law7?.title).toMatch(/Get Others to Do the Work/i);
+    });
+  },
+);
 
 describeShelf('structural edge cases across the library', () => {
   it('Word Power: 362 spine files collapse into ~29 chapters spanning many files each', () => {
@@ -151,14 +168,14 @@ describeShelf('structural edge cases across the library', () => {
     expect(cuts.length).toBeGreaterThan(100);
     const perFile = new Map<string, number>();
     for (const cut of cuts) {
-      const path = book.blocks[cut.at]!.path;
+      const path = must(book.blocks[cut.at], `block ${cut.at}`).path;
       perFile.set(path, (perFile.get(path) ?? 0) + 1);
     }
     expect(Math.max(...perFile.values())).toBeGreaterThan(1);
     const limited = limitCount(cuts, book.blocks, 50);
     expect(limited.length).toBeLessThanOrEqual(50);
     const chapters = toChapters(limited, book.blocks);
-    expect(chapters[chapters.length - 1]!.end).toBe(book.blocks.length);
+    expect(must(chapters[chapters.length - 1], 'last chapter').end).toBe(book.blocks.length);
   });
 
   it('mergeSmall removes cover and copyright stubs without dropping content', () => {
@@ -166,7 +183,10 @@ describeShelf('structural edge cases across the library', () => {
     const { cuts } = detect(book);
     const merged = mergeSmall(cuts, book.blocks, 500);
     expect(merged.length).toBeLessThanOrEqual(cuts.length);
-    expect(toChapters(merged, book.blocks).at(-1)!.end).toBe(book.blocks.length);
+    const mergedChapters = toChapters(merged, book.blocks);
+    expect(must(mergedChapters[mergedChapters.length - 1], 'last chapter').end).toBe(
+      book.blocks.length,
+    );
   });
 });
 
@@ -176,9 +196,10 @@ describeShelf('stub chapters', () => {
     const { cuts } = detect(book);
     const merged = mergeStubs(cuts, book.blocks, 200);
     const after = toChapters(merged, book.blocks);
-    expect(after[0]!.start).toBe(0);
-    expect(after[0]!.chars).toBeGreaterThanOrEqual(200);
-    expect(after.at(-1)!.end).toBe(book.blocks.length);
+    const first = must(after[0], 'first chapter');
+    expect(first.start).toBe(0);
+    expect(first.chars).toBeGreaterThanOrEqual(200);
+    expect(must(after[after.length - 1], 'last chapter').end).toBe(book.blocks.length);
   });
 
   it('leaves no chapter below the stub threshold', () => {
@@ -199,9 +220,10 @@ describeShelf('paragraphs split across printed lines', () => {
     expect(joined, 'the sidebar block').toBeDefined();
     // Source is <p>The Stars in the</p><p>Sky. There can be only</p>… — nine
     // fragments that are one sentence.
-    expect(joined!.text).toContain('one sun at a time');
-    expect(joined!.text).toContain("master star's");
-    expect(joined!.text.trimEnd().endsWith('intensity.')).toBe(true);
+    const sidebar = must(joined, 'the sidebar block');
+    expect(sidebar.text).toContain('one sun at a time');
+    expect(sidebar.text).toContain("master star's");
+    expect(sidebar.text.trimEnd().endsWith('intensity.')).toBe(true);
   });
 
   it('does not glue together paragraphs that already ended properly', () => {
@@ -228,8 +250,12 @@ describeShelf('inline markup and figures', () => {
 
   it('html text content matches the plain text annotations index into', () => {
     const book = openEpub(loadBook('Laws of Power'));
-    const strip = (h: string) => h.replace(/<[^>]+>/g, '')
-      .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+    const strip = (h: string) =>
+      h
+        .replace(/<[^>]+>/g, '')
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>');
     for (const block of book.blocks.slice(0, 400)) {
       if (block.image) continue;
       expect(strip(block.html)).toBe(block.text);
@@ -248,7 +274,8 @@ describeShelf('derived titles say something new', () => {
       for (const c of chapters) {
         const parts = c.title.split(' — ');
         if (parts.length < 2) continue;
-        const [head, tail] = [parts[0]!.toLowerCase().trim(), parts.slice(1).join(' — ').toLowerCase().trim()];
+        const head = must(parts[0], 'title head').toLowerCase().trim();
+        const tail = parts.slice(1).join(' — ').toLowerCase().trim();
         expect(/^[\d.,ivxlcm\s:-]+$/i.test(tail), `${basename(path)}: "${c.title}"`).toBe(false);
         expect(head.includes(tail), `${basename(path)}: "${c.title}"`).toBe(false);
       }
@@ -260,14 +287,16 @@ describeShelf('titles keep the book\'s own wording', () => {
   it('recovers a name only when the label is a bare enumerator', () => {
     const laws = openEpub(loadBook('Laws of Power'));
     const lawTitles = deriveTitles(
-      toChapters(mergeStubs(detect(laws).cuts, laws.blocks, 200), laws.blocks), laws.blocks,
+      toChapters(mergeStubs(detect(laws).cuts, laws.blocks, 200), laws.blocks),
+      laws.blocks,
     ).map((c) => c.title);
     // "LAW 1" is an enumerator, so the real name must be recovered.
     expect(lawTitles.join('\n')).toMatch(/LAW 1 — Never Outshine the Master/i);
 
     const atomic = openEpub(loadBook('Atomic Habits'));
     const atomicTitles = deriveTitles(
-      toChapters(mergeStubs(detect(atomic).cuts, atomic.blocks, 200), atomic.blocks), atomic.blocks,
+      toChapters(mergeStubs(detect(atomic).cuts, atomic.blocks, 200), atomic.blocks),
+      atomic.blocks,
     ).map((c) => c.title);
     // These labels are already titles and must survive untouched.
     expect(atomicTitles).toContain('1: The Surprising Power of Atomic Habits');
@@ -279,8 +308,9 @@ describe('inline emphasis converts to valid Markdown', () => {
   it('moves whitespace outside the markers so the emphasis actually renders', () => {
     // Real markup from Atomic Habits; the trailing space inside <b> would
     // otherwise produce "**Productivity compounds. **", which is not bold.
-    expect(inlineMarkdown('<b>Productivity compounds. </b>rest'))
-      .toBe('**Productivity compounds.** rest');
+    expect(inlineMarkdown('<b>Productivity compounds. </b>rest')).toBe(
+      '**Productivity compounds.** rest',
+    );
     expect(inlineMarkdown('a <i> word </i>b')).toBe('a *word* b');
   });
 
@@ -321,13 +351,17 @@ describeShelf('exported chapters are valid Markdown', () => {
   it('never leaves a space against an emphasis marker', () => {
     const book = openEpub(loadBook('Atomic Habits'));
     const chapters = deriveTitles(
-      toChapters(mergeStubs(detect(book).cuts, book.blocks, 200), book.blocks), book.blocks,
+      toChapters(mergeStubs(detect(book).cuts, book.blocks, 200), book.blocks),
+      book.blocks,
     );
     let bad = 0;
     for (const chapter of chapters) {
-      bad += danglingMarkers(renderChapter(chapter, book.blocks, chapter.title, {
-        bookTitle: book.metadata.title, totalChapters: chapters.length,
-      }));
+      bad += danglingMarkers(
+        renderChapter(chapter, book.blocks, chapter.title, {
+          bookTitle: book.metadata.title,
+          totalChapters: chapters.length,
+        }),
+      );
     }
     expect(bad).toBe(0);
   });
@@ -362,14 +396,19 @@ describeShelf('non-linear documents and footnotes', () => {
   it('renders numbered Markdown footnotes with their text', () => {
     const book = open();
     const chapters = deriveTitles(
-      toChapters(mergeStubs(detect(book).cuts, book.blocks, 200), book.blocks), book.blocks,
+      toChapters(mergeStubs(detect(book).cuts, book.blocks, 200), book.blocks),
+      book.blocks,
     );
     const withNote = chapters.find((c) =>
-      book.blocks.slice(c.start, c.end).some((b) => b.noterefs?.length));
+      book.blocks.slice(c.start, c.end).some((b) => b.noterefs?.length),
+    );
     expect(withNote, 'a chapter containing a footnote').toBeDefined();
 
-    const md = renderChapter(withNote!, book.blocks, withNote!.title, {
-      bookTitle: book.metadata.title, totalChapters: chapters.length, notes: book.notes,
+    const noted = must(withNote, 'a chapter containing a footnote');
+    const md = renderChapter(noted, book.blocks, noted.title, {
+      bookTitle: book.metadata.title,
+      totalChapters: chapters.length,
+      notes: book.notes,
     });
     expect(md).toMatch(/\[\^1\]/);
     expect(md).toMatch(/^\[\^1\]: \S/m);
@@ -391,7 +430,7 @@ describe('reading time', () => {
   it('never yields NaN for a library split before word counts existed', () => {
     // Those index.json files have no `words`, and NaN reached the interface as
     // "~NaN min" on every row rather than failing anywhere visible.
-    expect(readingMinutes(undefined as unknown as number)).toBe(1);
+    expect(readingMinutes(undefined)).toBe(1);
     expect(readingMinutes(NaN)).toBe(1);
     expect(readingMinutes(-10)).toBe(1);
   });

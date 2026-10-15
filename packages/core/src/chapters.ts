@@ -1,11 +1,13 @@
 import type { Block, BlockIndex, Chapter, CutPoint } from './types.js';
+import { must } from './must.js';
 
 /** Cut points become chapters: chapter i spans [cuts[i].at, cuts[i+1].at). */
 export function toChapters(cuts: CutPoint[], blocks: Block[]): Chapter[] {
   return cuts.map((cut, i) => {
-    const end = i + 1 < cuts.length ? cuts[i + 1]!.at : blocks.length;
+    const next = cuts[i + 1];
+    const end = next !== undefined ? next.at : blocks.length;
     let chars = 0;
-    for (let b = cut.at; b < end; b++) chars += blocks[b]!.text.length;
+    for (let b = cut.at; b < end; b++) chars += must(blocks[b], `block ${b}`).text.length;
     return {
       index: i,
       title: cut.title,
@@ -77,10 +79,11 @@ export function mergeStubs(cuts: CutPoint[], blocks: Block[], minChars: number):
 
     if (victim < current.length - 1) {
       // Forward: keep this start, adopt the following chapter's title.
-      const next = current[victim + 1]!;
+      const next = must(current[victim + 1], `cut ${victim + 1}`);
+      const here = must(current[victim], `cut ${victim}`);
       current = [
         ...current.slice(0, victim),
-        { ...next, at: current[victim]!.at },
+        { ...next, at: here.at },
         ...current.slice(victim + 2),
       ];
     } else {
@@ -101,7 +104,9 @@ export function limitCount(cuts: CutPoint[], blocks: Block[], max: number): CutP
     const chapters = toChapters(current, blocks);
     let victim = 1;
     for (let i = 1; i < chapters.length; i++) {
-      if (chapters[i]!.chars < chapters[victim]!.chars) victim = i;
+      const chapter = must(chapters[i], `chapter ${i}`);
+      const smallest = must(chapters[victim], `chapter ${victim}`);
+      if (chapter.chars < smallest.chars) victim = i;
     }
     current = mergeUp(current, victim);
   }

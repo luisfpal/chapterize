@@ -1,5 +1,7 @@
-import { parseDocument } from 'htmlparser2';
+import { ElementType } from 'domelementtype';
+import { isText } from 'domhandler';
 import type { Document, Element, AnyNode } from 'domhandler';
+import { parseDocument } from 'htmlparser2';
 
 /** Parse XML (OPF, NCX, container.xml). Namespace prefixes are kept verbatim. */
 export function parseXml(source: string): Document {
@@ -12,7 +14,11 @@ export function parseHtml(source: string): Document {
 }
 
 export function isElement(node: AnyNode): node is Element {
-  return node.type === 'tag' || node.type === 'script' || node.type === 'style';
+  return (
+    node.type === ElementType.Tag ||
+    node.type === ElementType.Script ||
+    node.type === ElementType.Style
+  );
 }
 
 /**
@@ -20,7 +26,7 @@ export function isElement(node: AnyNode): node is Element {
  * are the same element. Real EPUBs are inconsistent about this.
  */
 function tagMatches(node: Element, name: string): boolean {
-  const local = node.name.includes(':') ? node.name.split(':').pop()! : node.name;
+  const local = node.name.split(':').pop() ?? node.name;
   return local.toLowerCase() === name.toLowerCase();
 }
 
@@ -34,11 +40,11 @@ export function findAll(root: AnyNode | AnyNode[], name: string): Element[] {
   const out: Element[] = [];
   const visit = (node: AnyNode): void => {
     if (isElement(node) && tagMatches(node, name)) out.push(node);
-    if ('children' in node && node.children) {
-      for (const child of node.children as AnyNode[]) visit(child);
-    }
+    if (!('children' in node)) return;
+    for (const child of node.children) visit(child);
   };
-  for (const node of Array.isArray(root) ? root : [root]) visit(node);
+  const nodes = Array.isArray(root) ? root : [root];
+  for (const node of nodes) visit(node);
   return out;
 }
 
@@ -48,17 +54,17 @@ export function findFirst(root: AnyNode | AnyNode[], name: string): Element | un
 
 /** Direct element children with the given local name. */
 export function children(node: Element, name: string): Element[] {
-  return (node.children ?? []).filter(
-    (c): c is Element => isElement(c) && tagMatches(c, name),
+  return node.children.filter(
+    (child): child is Element => isElement(child) && tagMatches(child, name),
   );
 }
 
 export function attr(node: Element, name: string): string | undefined {
-  const direct = node.attribs?.[name];
+  const direct = node.attribs[name];
   if (direct !== undefined) return direct;
   // Fall back to a namespace-prefixed form, e.g. `epub:type`.
-  for (const [k, v] of Object.entries(node.attribs ?? {})) {
-    if (k.includes(':') && k.split(':').pop() === name) return v;
+  for (const [key, value] of Object.entries(node.attribs)) {
+    if (key.includes(':') && key.split(':').pop() === name) return value;
   }
   return undefined;
 }
@@ -72,21 +78,23 @@ export function attr(node: Element, name: string): string | undefined {
  */
 export function textOf(node: AnyNode | AnyNode[]): string {
   let out = '';
-  const walk = (n: AnyNode): void => {
-    if (n.type === 'text') {
-      out += (n as unknown as { data: string }).data;
+  const walk = (current: AnyNode): void => {
+    if (isText(current)) {
+      out += current.data;
       return;
     }
-    if (!('children' in n) || !n.children) return;
-    if (isElement(n)) {
-      const tag = n.name.toLowerCase();
+    if (!('children' in current)) return;
+    if (isElement(current)) {
+      const tag = current.name.toLowerCase();
       if (tag === 'script' || tag === 'style') return;
+      // A line break is not a character. Dropping it glues the words on either
+      // side into one, and every search and quote then misses.
       if (tag === 'br' || tag === 'hr') {
         out += ' ';
         return;
       }
     }
-    for (const c of n.children as AnyNode[]) walk(c);
+    for (const child of current.children) walk(child);
   };
   for (const n of Array.isArray(node) ? node : [node]) walk(n);
   return collapse(out);
