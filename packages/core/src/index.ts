@@ -19,3 +19,11 @@ export {
   slugify, chapterFilename, imageFilename, inlineMarkdown,
   type RenderOptions,
 } from './markdown.js';
+export {
+  STUDY_WORD_FLOOR, StudyError, flattenOutline,
+  buildStudyPack, renderStudyMarkdown, renderStudyHtml, renderStudyPrompt,
+  planStudyPacks,
+  type WhySource, type OutlineStep, type KeyIdea, type QuestionKind,
+  type StudyQuestion, type StudyPack, type StudyInput,
+  type StudyFile, type SkippedChapter, type StudyPlan, type StudyPlanOptions,
+} from './study.js';
