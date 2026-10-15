@@ -1,7 +1,7 @@
 import { unzipSync, strFromU8 } from 'fflate';
 import type { AnyNode, Element } from 'domhandler';
 import type { Block, Book, BookMetadata, NoteRef, SpineItem, TocEntry } from './types.js';
-import { attr, children, findAll, findFirst, isElement, parseHtml, parseXml, textOf } from './xml.js';
+import { attr, children, collapse, findAll, findFirst, isElement, parseHtml, parseXml, textOf } from './xml.js';
 
 const CONTAINER = 'META-INF/container.xml';
 
@@ -128,7 +128,10 @@ export function openEpub(bytes: Uint8Array): Book {
     if (!block.text) continue;
     // Note bodies usually repeat the marker they are referenced by ("* Interested
     // readers…"); the Markdown footnote supplies its own, so drop the duplicate.
-    const text = block.text.replace(/^\s*(?:[*\u2020\u2021\u00a7]+|\d{1,3}[.)]?)\s+/, '');
+    // The marker is a star, or a number with punctuation ("1.", "12)"). A bare
+    // number is the note's own text: stripping "12 " from "12 men remained"
+    // deletes words the author wrote. The optional punctuation used to do that.
+    const text = block.text.replace(/^\s*(?:[*\u2020\u2021\u00a7]+|\d{1,3}[.)])\s+/, '');
     if (!text) continue;
     for (const id of block.ids) {
       notes.set(`${block.path}#${id}`, text);
@@ -164,11 +167,33 @@ function readMetadata(opf: ReturnType<typeof parseXml>, pkg: Element | undefined
   };
 }
 
+/**
+ * Nav types that are not a table of contents.
+ *
+ * `page-list` is the one that hurts: it carries a link per printed page, and
+ * treating it as the TOC invents a chapter per page. Falling back to "the
+ * first nav" does exactly that when the page-list is written first.
+ */
+const NAV_NOT_TOC = new Set(['page-list', 'landmarks', 'lot', 'loi', 'loa', 'lov']);
+
+function navTypes(node: Element): string[] {
+  return (attr(node, 'type') ?? '').toLowerCase().split(/\s+/).filter(Boolean);
+}
+
+function selectTocNav(navs: Element[]): Element | undefined {
+  const typed = navs.find((n) => navTypes(n).includes('toc')
+    || (attr(n, 'role') ?? '').toLowerCase() === 'doc-toc');
+  if (typed) return typed;
+  // An unlabeled nav is still the contents when the others are page lists.
+  // A document that has only a page-list has no table of contents at all.
+  return navs.find((n) => !navTypes(n).some((t) => NAV_NOT_TOC.has(t)));
+}
+
 /** EPUB 3: `<nav epub:type="toc">` containing nested `<ol><li><a href>`. */
 function readNav(source: string, navPath: string): TocEntry[] {
   const doc = parseHtml(source);
   const navs = findAll(doc, 'nav');
-  const tocNav = navs.find((n) => (attr(n, 'type') ?? '').split(/\s+/).includes('toc')) ?? navs[0];
+  const tocNav = selectTocNav(navs);
   if (!tocNav) return [];
 
   const out: TocEntry[] = [];
@@ -188,7 +213,15 @@ function readNav(source: string, navPath: string): TocEntry[] {
       for (const sub of children(li, 'ol')) walkList(sub, depth + 1);
     }
   };
-  for (const list of children(tocNav, 'ol')) walkList(list, 0);
+  // The spec's own example puts an `<h1>` beside the `<ol>`, as a direct
+  // child. Some generators wrap that list in another element; the entries are
+  // still the contents, and skipping them leaves the book with no chapters.
+  let lists = children(tocNav, 'ol');
+  if (!lists.length) {
+    const first = findAll(tocNav, 'ol')[0];
+    if (first) lists = [first];
+  }
+  for (const list of lists) walkList(list, 0);
   return out;
 }
 
@@ -246,6 +279,11 @@ function inlineHtml(node: AnyNode): string {
     if (!isElement(n)) return;
     const tag = n.name.toLowerCase();
     if (tag === 'script' || tag === 'style') return;
+    // Same reason as in textOf: a break is a space, or the words join.
+    if (tag === 'br') {
+      out += ' ';
+      return;
+    }
     // A footnote reference keeps its marker text but becomes a tag the renderer
     // recognises, so "history.*" can become "history.[^1]" on export.
     const isNoteref =
@@ -330,6 +368,11 @@ function joinWrappedLines(blocks: Block[]): Block[] {
       prev!.text = `${prev!.text} ${block.text}`;
       prev!.html = `${prev!.html} ${block.html}`;
       prev!.ids.push(...block.ids);
+      // The reference often sits on the continuation line. Joining the markup
+      // without the ref list leaves the asterisk in the prose and drops the note.
+      if (block.noterefs?.length) {
+        prev!.noterefs = [...(prev!.noterefs ?? []), ...block.noterefs];
+      }
     } else {
       out.push(block);
     }
@@ -360,6 +403,50 @@ function collectNoterefs(el: Element, path: string): NoteRef[] {
   return out;
 }
 
+/** True when a descendant is itself a block, so this element is a container. */
+function hasBlockDescendant(el: Element): boolean {
+  for (const child of el.children ?? []) {
+    if (child.type !== 'tag') continue;
+    const c = child as Element;
+    const name = c.name.toLowerCase();
+    if (BLOCK_TAGS.has(name)) return true;
+    if (hasBlockDescendant(c)) return true;
+  }
+  return false;
+}
+
+/**
+ * Ids on elements inside a leaf.
+ *
+ * Chapter anchors often sit on an `<a>` or `<span>` inside the heading, not on
+ * the heading. A wrapper id is carried down separately; missing these drops
+ * every mid-file chapter onto the same block, and dedupe then deletes them.
+ */
+function descendantIds(el: Element): string[] {
+  const ids: string[] = [];
+  const walk = (node: Element): void => {
+    for (const child of node.children ?? []) {
+      if (child.type !== 'tag') continue;
+      const c = child as Element;
+      const id = attr(c, 'id');
+      if (id) ids.push(id);
+      walk(c);
+    }
+  };
+  walk(el);
+  return ids;
+}
+
+/**
+ * A paragraph inside a list item or a blockquote is still that item or quote.
+ * The wrapper is not a leaf, so emitting the inner `<p>` as a paragraph made
+ * the list and the quotation disappear on export.
+ */
+function resolveTag(tag: string, inherited: string | undefined): string {
+  if (inherited && (tag === 'p' || tag === 'div')) return inherited;
+  return tag;
+}
+
 /**
  * Emit one Block per leaf block-level element, in document order.
  *
@@ -381,7 +468,7 @@ function collectBlocks(source: string, path: string, spineIndex: number, out: Bl
   const emit = (el: Element, tag: string): void => {
     const text = textOf(el);
     const own = attr(el, 'id');
-    const ids = own ? [...pendingIds, own] : pendingIds;
+    const ids = [...pendingIds, ...(own ? [own] : []), ...descendantIds(el)];
     pendingIds = [];
     const noterefs = collectNoterefs(el, path);
     const figure = findAll(el, 'img')[0] ?? findAll(el, 'image')[0];
@@ -403,13 +490,31 @@ function collectBlocks(source: string, path: string, spineIndex: number, out: Bl
     });
   };
 
-  const hasBlockChild = (el: Element): boolean =>
-    (el.children ?? []).some(
-      (c) => c.type === 'tag' && BLOCK_TAGS.has((c as Element).name.toLowerCase()),
-    );
+  /** A sentence that lived directly in a container, beside real block children. */
+  const emitLoose = (text: string, tag: string): void => {
+    const ids = pendingIds;
+    pendingIds = [];
+    const headingMatch = /^h([1-6])$/.exec(tag);
+    out.push({
+      spineIndex,
+      path,
+      ids: [...ids],
+      tag,
+      heading: headingMatch ? Number(headingMatch[1]) : 0,
+      text,
+      html: escapeHtml(text),
+    });
+  };
 
-  const walk = (node: Element): void => {
+  const visit = (node: Element, inherited: string | undefined): void => {
     for (const child of node.children ?? []) {
+      if (child.type === 'text') {
+        // The old walk ignored text nodes. A container that also holds a
+        // paragraph therefore swallowed the sentence written beside it.
+        const text = collapse((child as { data: string }).data);
+        if (text) emitLoose(text, inherited ?? 'p');
+        continue;
+      }
       if (child.type !== 'tag') continue;
       const el = child as Element;
       const tag = el.name.toLowerCase();
@@ -418,17 +523,20 @@ function collectBlocks(source: string, path: string, spineIndex: number, out: Bl
       if (tag === 'img' || tag === 'image') {
         // Figures carry no text, so they would otherwise vanish entirely.
         emit(el, 'figure');
-      } else if (BLOCK_TAGS.has(tag) && !hasBlockChild(el)) {
-        emit(el, tag);
-      } else {
-        // Not a leaf block: keep its id so it lands on the next real block.
-        const id = attr(el, 'id');
-        if (id) pendingIds.push(id);
-        walk(el);
+        continue;
       }
+      if (BLOCK_TAGS.has(tag) && !hasBlockDescendant(el)) {
+        emit(el, resolveTag(tag, inherited));
+        continue;
+      }
+      // Not a leaf: keep its id so it lands on the next real block.
+      const id = attr(el, 'id');
+      if (id) pendingIds.push(id);
+      const next = tag === 'blockquote' || tag === 'li' ? tag : inherited;
+      visit(el, next);
     }
   };
-  walk(body as Element);
+  visit(body as Element, undefined);
 
   // Ids trailing at the end of a document belong to its last block.
   if (pendingIds.length && out.length) {

@@ -5,7 +5,7 @@
  * app re-splits it on open. A reader should never be asked to re-split
  * anything — that is the parser's business leaking onto their screen.
  */
-export const PARSER_VERSION = 3;
+export const PARSER_VERSION = 4;
 
 export * from './types.js';
 export { openEpub, EpubError, resolvePath } from './epub.js';
@@ -19,3 +19,10 @@ export {
   slugify, chapterFilename, imageFilename, inlineMarkdown,
   type RenderOptions,
 } from './markdown.js';
+export {
+  annotationRange, reanchorAnnotations, withHighlights,
+  type HighlightNote, type AnnotationRange,
+} from './annotations.js';
+export { search, type Hit } from './search.js';
+export { readerCommand, type ReaderCommand, type ReaderKeyState } from './reader.js';
+export { carryBookState, parseStoredJson } from './library.js';

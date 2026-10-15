@@ -1,54 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { Block } from '@chapterize/core';
+import { search, type Block, type Hit } from '@chapterize/core';
 import { native } from './native';
 
-/* ── search ─────────────────────────────────────────────────────────── */
-
-export interface Hit {
-  block: number;
-  chapter: number;
-  /** Text around the match, with the match itself marked by offsets. */
-  context: string;
-  at: number;
-  length: number;
-}
-
-/**
- * Find a phrase across the whole book.
- *
- * Searches `Block.text`, which is the same string annotation offsets index into,
- * so a hit's position is directly usable for scrolling and highlighting.
- */
-export function search(
-  blocks: Block[],
-  chapters: { start: number; end: number }[],
-  query: string,
-  limit = 200,
-): Hit[] {
-  const needle = query.trim().toLowerCase();
-  if (needle.length < 2) return [];
-
-  const hits: Hit[] = [];
-  for (let b = 0; b < blocks.length && hits.length < limit; b++) {
-    const text = blocks[b]!.text;
-    const hay = text.toLowerCase();
-    let from = 0;
-    while (hits.length < limit) {
-      const at = hay.indexOf(needle, from);
-      if (at === -1) break;
-      const start = Math.max(0, at - 45);
-      hits.push({
-        block: b,
-        chapter: chapters.findIndex((c) => b >= c.start && b < c.end),
-        context: (start > 0 ? '…' : '') + text.slice(start, at + needle.length + 55),
-        at: at - start + (start > 0 ? 1 : 0),
-        length: needle.length,
-      });
-      from = at + needle.length;
-    }
-  }
-  return hits;
-}
+export type { Hit };
+export { search };
 
 export function SearchPanel({
   blocks, chapters, onGo,
@@ -116,13 +71,17 @@ export function useSpeech() {
     setSpeaking(false);
   }, []);
 
-  const start = useCallback(async (text: string) => {
-    if (!available || !text.trim()) return;
+  const start = useCallback(async (text: string): Promise<string | null> => {
+    if (!available) return 'Reading aloud is unavailable on this system.';
+    if (!text.trim()) return null;
     setSpeaking(true);
     try {
       await native.speak(text);
-    } catch {
+      return null;
+    } catch (cause) {
       setSpeaking(false);
+      const detail = cause instanceof Error ? cause.message : String(cause);
+      return `Could not read this chapter aloud: ${detail}`;
     }
   }, [available]);
 

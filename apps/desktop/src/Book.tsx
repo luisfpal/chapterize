@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Block, CutPoint } from '@chapterize/core';
-import { readingMinutes, splitAt, mergeUp, retitle } from '@chapterize/core';
+import { readingMinutes, splitAt, mergeUp, retitle, annotationRange, readerCommand } from '@chapterize/core';
 import { writeText as copyToClipboard } from '@tauri-apps/plugin-clipboard-manager';
 import { revealItemInDir } from '@tauri-apps/plugin-opener';
 import { native, type Annotation, type BookIndex, type LoadedBook } from './native';
@@ -320,23 +320,31 @@ export function BookView({ book, onBack, onExport }: Props) {
     if (editing) return;
     const selection = window.getSelection();
     if (!selection || selection.isCollapsed) return;
-    const text = selection.toString().trim();
-    if (!text) return;
     const anchor = selection.anchorNode;
     const host = (anchor instanceof Element ? anchor : anchor?.parentElement)?.closest('[data-block]');
     if (!host) return;
+    const blockIndex = Number(host.getAttribute('data-block'));
+    // The quote has to be the block's own text. selection.toString() trims,
+    // and it joins neighbouring blocks, so the stored quote stopped matching
+    // the offsets the highlight is painted with.
+    const blockText = book.blocks[blockIndex]?.text;
+    if (blockText === undefined) return;
     const range = selection.getRangeAt(0);
-    const start = offsetWithin(host, range.startContainer, range.startOffset);
-    const end = offsetWithin(host, range.endContainer, range.endOffset);
-    if (end <= start) return;
+    const span = annotationRange(
+      blockText,
+      offsetWithin(host, range.startContainer, range.startOffset),
+      offsetWithin(host, range.endContainer, range.endOffset),
+    );
+    if (!span) return;
     setPending({
       id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
-      block: Number(host.getAttribute('data-block')),
-      start, end, quote: text, color: 1, createdAt: new Date().toISOString(),
+      block: blockIndex,
+      start: span.start, end: span.end, quote: span.quote,
+      color: 1, createdAt: new Date().toISOString(),
     });
     setDraft('');
     setTab('notes');
-  }, [editing]);
+  }, [book.blocks, editing]);
 
   const commit = useCallback(async (color: Annotation['color']) => {
     if (!pending) return;
@@ -421,29 +429,36 @@ export function BookView({ book, onBack, onExport }: Props) {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
       if (target.tagName === 'TEXTAREA' || target.tagName === 'INPUT') return;
-      if (e.key === 'n') go(1);
-      else if (e.key === 'p') go(-1);
-      else if (e.key === 'j') readerRef.current?.scrollBy({ top: 120 });
-      else if (e.key === 'k') readerRef.current?.scrollBy({ top: -120 });
-      else if (e.key === 'h' && !editing) capture();
-      else if (e.key === 'm' && !editing) void toggleFinished();
-      else if (e.key === 'e') editing ? setEditing(false) : enterEdit();
-      else if (e.key === '/') { e.preventDefault(); setTab('search'); }
-      else if (e.key === 'u' && editing) undo();
-      else if (e.key === 'Escape') {
-        if (lookup) setLookup(null);
-        else if (speech.speaking) void speech.stop();
-        else if (note) setNote(null);
-        else if (pending) setPending(null);
-        else if (editing) { setEditing(false); setCuts(null); }
-        else onBack();
+      const command = readerCommand(e.key, {
+        editing,
+        lookup: lookup !== null,
+        speaking: speech.speaking,
+        note: note !== null,
+        pending: pending !== null,
+      });
+      switch (command.kind) {
+        case 'chapter': go(command.delta); break;
+        case 'scroll': readerRef.current?.scrollBy({ top: command.delta }); break;
+        case 'highlight': capture(); break;
+        case 'mark-read': void toggleFinished(); break;
+        case 'toggle-edit': editing ? setEditing(false) : enterEdit(); break;
+        case 'search': e.preventDefault(); setTab('search'); break;
+        case 'undo-edit': undo(); break;
+        case 'close-lookup': setLookup(null); break;
+        case 'stop-speech': void speech.stop(); break;
+        case 'close-note': setNote(null); break;
+        case 'close-pending': setPending(null); break;
+        case 'cancel-edit': setEditing(false); setCuts(null); break;
+        case 'back': onBack(); break;
+        case 'text-size':
+          setSize((v) => Math.min(26, Math.max(13, v + command.delta)));
+          break;
+        case 'ignore': break;
       }
-      else if (e.key === '=' || e.key === '+') setSize((v) => Math.min(26, v + 1));
-      else if (e.key === '-') setSize((v) => Math.max(13, v - 1));
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [capture, editing, enterEdit, go, note, onBack, pending, toggleFinished, undo]);
+  }, [capture, editing, enterEdit, go, lookup, note, onBack, pending, speech.speaking, speech.stop, toggleFinished, undo]);
 
   if (!chapter) return <div className="empty">This book has no chapters.</div>;
 
@@ -475,7 +490,8 @@ export function BookView({ book, onBack, onExport }: Props) {
                         ? speech.stop()
                         : speech.start(
                             book.blocks.slice(chapter.start, chapter.end)
-                              .map((b) => b.text).filter((t) => t.length > 1).join('. ')))}>
+                              .map((b) => b.text).filter((t) => t.length > 1).join('. '),
+                          ).then((err) => { if (err) say(err); }))}>
                 {speech.speaking ? '■ Stop' : '▶ Listen'}
               </button>
             )}

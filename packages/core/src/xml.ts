@@ -70,6 +70,12 @@ export function textOf(node: AnyNode): string {
     if (n.type === 'text') out += (n as unknown as { data: string }).data;
     else if ('children' in n && n.children) {
       if (isElement(n) && (n.name === 'script' || n.name === 'style')) return;
+      // A line break is not a character, but dropping it glues the words on
+      // either side together ("Helloharbor"). A space is what the reader saw.
+      if (isElement(n) && n.name.toLowerCase() === 'br') {
+        out += ' ';
+        return;
+      }
       for (const c of n.children as AnyNode[]) walk(c);
     }
   };

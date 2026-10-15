@@ -94,13 +94,23 @@ export function detectFromToc(book: Book): Detection {
 export function detectFromHeadings(book: Book, level?: number): Detection {
   const levels = level ? [level] : [1, 2, 3];
   let best: CutPoint[] = [];
+  // A heading on every block is a running header, not a chapter, so a long
+  // book may only keep a level with at least about three blocks behind each
+  // cut. A pamphlet whose chapter is a heading plus one paragraph never
+  // reaches that ratio, and the test used to throw those headings away —
+  // the whole file became one chapter. The floor admits a handful of real
+  // headings; on a long book the one-third cap still rejects the running header.
+  const cap = Math.max(
+    Math.floor(book.blocks.length / 3),
+    Math.min(book.blocks.length, 12),
+  );
 
   for (const lvl of levels) {
     const cuts = book.blocks
       .map((block, at) => ({ block, at }))
       .filter(({ block }) => block.heading === lvl && block.text.length > 0)
       .map(({ block, at }): CutPoint => ({ at, title: block.text, source: 'heading', depth: 0 }));
-    if (cuts.length > best.length && cuts.length <= book.blocks.length / 3) best = cuts;
+    if (cuts.length > best.length && cuts.length <= cap) best = cuts;
     if (level) best = cuts;
   }
   return { cuts: normalise(best, 'heading'), strategy: 'heading', unresolved: [] };
@@ -126,14 +136,17 @@ export function detect(book: Book, strategy?: CutPoint['source']): Detection {
   if (strategy === 'heading') return detectFromHeadings(book);
   if (strategy === 'spine') return detectFromSpine(book);
   if (strategy === 'toc' || strategy === undefined) {
-    if (book.toc.length > 1) {
-      const fromToc = detectFromToc(book);
-      if (fromToc.cuts.length > 1) return fromToc;
-    }
+    // A single TOC entry is not a table of contents. Several entries that all
+    // collapse onto one block aren't either — but the reasons they failed are
+    // still why the fallback ran, and dropping them leaves the UI saying only
+    // "found from headings" with no account of the broken links.
+    const fromToc = book.toc.length > 1 ? detectFromToc(book) : undefined;
+    if (fromToc && fromToc.cuts.length > 1) return fromToc;
     if (strategy === 'toc') return detectFromToc(book);
+    const unresolved = fromToc?.unresolved ?? [];
     const fromHeadings = detectFromHeadings(book);
-    if (fromHeadings.cuts.length > 1) return fromHeadings;
-    return detectFromSpine(book);
+    if (fromHeadings.cuts.length > 1) return { ...fromHeadings, unresolved };
+    return { ...detectFromSpine(book), unresolved };
   }
   return detectFromSpine(book);
 }

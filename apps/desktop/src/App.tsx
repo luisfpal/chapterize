@@ -3,7 +3,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { revealItemInDir } from '@tauri-apps/plugin-opener';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { listen } from '@tauri-apps/api/event';
-import { readingMinutes } from '@chapterize/core';
+import { readingMinutes, withHighlights, parseStoredJson } from '@chapterize/core';
 import { native, type AppDirs, type BookIndex, type LoadedBook } from './native';
 import { ingest, load } from './ingest';
 import { BookView } from './Book';
@@ -133,7 +133,7 @@ export function App() {
       setNotice(await native.sendViaAmazon(`${dir}/book.epub`));
       const raw = await native.readText(`${dir}/index.json`);
       if (raw) {
-        const idx = JSON.parse(raw) as BookIndex;
+        const idx = parseStoredJson<BookIndex>(raw, `${dir}/index.json`);
         idx.sentToKindle = new Date().toISOString();
         await native.writeText(`${dir}/index.json`, JSON.stringify(idx, null, 2));
       }
@@ -201,11 +201,7 @@ export function App() {
         const body = await native.readText(`${opened.dir}/chapters/${chapter.file}`);
         if (body === null) continue;
         const notes = opened.annotations.filter((a) => a.block >= chapter.start && a.block < chapter.end);
-        const suffix = notes.length
-          ? '\n\n---\n\n## My highlights\n\n' +
-            notes.map((a) => `> ${a.quote}\n${a.note ? `\n${a.note}\n` : ''}`).join('\n')
-          : '';
-        await native.writeText(`${target}/${chapter.file}`, body + suffix);
+        await native.writeText(`${target}/${chapter.file}`, withHighlights(body, notes));
         written++;
       }
       setNotice(`Exported ${written} chapter${written === 1 ? '' : 's'} to ${target}`);

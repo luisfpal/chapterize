@@ -37,9 +37,20 @@ export function chapterFilename(chapter: Chapter, title: string): string {
   return `${String(chapter.index).padStart(3, '0')}-${slugify(title)}.md`;
 }
 
-/** Basename of a path inside the EPUB, used as the exported image filename. */
+/**
+ * Filename for an image exported beside the chapter.
+ *
+ * The basename alone collides: `chapters/a/mark.png` and `plates/b/mark.png`
+ * both become `mark.png`, and the second write replaces the first, so two
+ * figures render as one. The directory stays in the name, with no slashes,
+ * because the writer refuses a path inside a filename.
+ */
 export function imageFilename(path: string): string {
-  return path.split('/').pop() ?? path;
+  const clean = path
+    .replace(/[^A-Za-z0-9.]+/g, '_')
+    .replace(/\.{2,}/g, '_')
+    .replace(/^_+|_+$/g, '');
+  return clean || 'image';
 }
 
 /** `<noteref>*</noteref>` -> `[^3]`, numbered per chapter. */
@@ -51,19 +62,31 @@ function replaceNoterefs(html: string, numbers: number[]): string {
   });
 }
 
-function renderBlock(block: Block, noteNumbers?: number[]): string {
-  if (block.image) {
-    return `![${(block.alt ?? '').replace(/[[\]]/g, '')}](images/${imageFilename(block.image)})`;
-  }
-  if (!block.text) return '';
-  if (block.heading > 0) return `${'#'.repeat(Math.min(block.heading, 6))} ${block.text}`;
-  if (block.tag === 'li') return `- ${block.text}`;
-  if (block.tag === 'blockquote') return `> ${block.text}`;
-  if (block.tag === 'pre') return '```\n' + block.text + '\n```';
-  // Inline emphasis is carried through so exported prose keeps the author's
-  // stress; the tag set is a fixed whitelist, so this cannot emit anything else.
+function figureLine(block: Block): string | undefined {
+  if (!block.image) return undefined;
+  const alt = (block.alt ?? '').replace(/[[\]]/g, '');
+  return `![${alt}](images/${imageFilename(block.image)})`;
+}
+
+/** Inline emphasis, with footnote markers already numbered for this chapter. */
+function proseOf(block: Block, noteNumbers?: number[]): string {
   const html = noteNumbers ? replaceNoterefs(block.html, noteNumbers) : block.html;
   return html ? inlineMarkdown(html) : block.text;
+}
+
+function renderBlock(block: Block, noteNumbers?: number[]): string {
+  const figure = figureLine(block);
+  // An inline image used to replace the whole block, so the sentence it sat
+  // in ("see the chart before sailing") never reached the export.
+  if (figure && !block.text) return figure;
+  if (!block.text) return '';
+  let line: string;
+  if (block.heading > 0) line = `${'#'.repeat(Math.min(block.heading, 6))} ${block.text}`;
+  else if (block.tag === 'li') line = `- ${proseOf(block, noteNumbers)}`;
+  else if (block.tag === 'blockquote') line = `> ${proseOf(block, noteNumbers)}`;
+  else if (block.tag === 'pre') line = '```\n' + block.text + '\n```';
+  else line = proseOf(block, noteNumbers);
+  return figure ? `${line}\n\n${figure}` : line;
 }
 
 /**
