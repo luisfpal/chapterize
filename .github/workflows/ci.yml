@@ -6,17 +6,25 @@ on:
   pull_request:
 
 jobs:
-  core:
-    runs-on: ubuntu-latest
+  check:
+    name: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 22, cache: npm }
+        with:
+          node-version: 22
+          cache: npm
       - run: npm ci
+      - run: npm run format:check
+      - run: npm run lint
       - run: npm run typecheck
-      # The parser suite reads the maintainer's real library, which is not in the
-      # repo. It skips itself when absent, so CI proves the build and the types;
-      # the detection guarantees are proven locally against real books.
+      # npm test runs the parser suite and scripts/verify.mjs. The suite skips
+      # real books when CHAPTERIZE_FIXTURES is unset. verify builds its own.
       - run: npm test
 
   native:

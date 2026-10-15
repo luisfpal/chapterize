@@ -1,19 +1,54 @@
+import { isText } from 'domhandler';
+import type { AnyNode, Document, Element } from 'domhandler';
 import { unzipSync, strFromU8 } from 'fflate';
-import type { AnyNode, Element } from 'domhandler';
-import type { Block, Book, BookMetadata, NoteRef, SpineItem, TocEntry } from './types.js';
-import { attr, children, findAll, findFirst, isElement, parseHtml, parseXml, textOf } from './xml.js';
+import type {
+  Block,
+  Book,
+  BookMetadata,
+  HeadingLevel,
+  NoteRef,
+  SpineItem,
+  TocEntry,
+} from './types.js';
+import {
+  attr,
+  children,
+  findAll,
+  findFirst,
+  isElement,
+  parseHtml,
+  parseXml,
+  textOf,
+} from './xml.js';
 
 const CONTAINER = 'META-INF/container.xml';
 
 /** Elements that carry their own line in the reading flow. */
 const BLOCK_TAGS = new Set([
-  'p', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'blockquote',
-  'pre', 'figcaption', 'td', 'th', 'dt', 'dd', 'section', 'article', 'aside',
+  'p',
+  'div',
+  'h1',
+  'h2',
+  'h3',
+  'h4',
+  'h5',
+  'h6',
+  'li',
+  'blockquote',
+  'pre',
+  'figcaption',
+  'td',
+  'th',
+  'dt',
+  'dd',
+  'section',
+  'article',
+  'aside',
 ]);
 
 export class EpubError extends Error {
-  constructor(message: string) {
-    super(message);
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
     this.name = 'EpubError';
   }
 }
@@ -47,7 +82,8 @@ export function openEpub(bytes: Uint8Array): Book {
   } catch (cause) {
     throw new EpubError(
       'Not a readable EPUB: the file is not a valid ZIP archive. ' +
-      'If it came from a store it may carry DRM, which must be removed before it can be opened.',
+        'If it came from a store it may carry DRM, which must be removed before it can be opened.',
+      { cause },
     );
   }
 
@@ -58,10 +94,14 @@ export function openEpub(bytes: Uint8Array): Book {
   };
 
   // 1. container.xml -> package document path
-  if (!files[CONTAINER]) throw new EpubError(`EPUB is missing "${CONTAINER}"; it is not a valid EPUB.`);
+  if (!files[CONTAINER])
+    throw new EpubError(`EPUB is missing "${CONTAINER}"; it is not a valid EPUB.`);
   const rootfile = findFirst(parseXml(read(CONTAINER)), 'rootfile');
   const opfPath = rootfile && attr(rootfile, 'full-path');
-  if (!opfPath) throw new EpubError('container.xml does not declare a package document (<rootfile full-path>).');
+  if (!opfPath)
+    throw new EpubError(
+      'container.xml does not declare a package document (<rootfile full-path>).',
+    );
 
   // 2. package document -> metadata, manifest, spine
   const opf = parseXml(read(opfPath));
@@ -156,10 +196,12 @@ function readMetadata(opf: ReturnType<typeof parseXml>, pkg: Element | undefined
     const value = el ? textOf(el) : '';
     return value || undefined;
   };
+  const author = pick('creator');
+  const language = pick('language');
   return {
     title: pick('title') ?? 'Untitled',
-    ...(pick('creator') !== undefined ? { author: pick('creator')! } : {}),
-    ...(pick('language') !== undefined ? { language: pick('language')! } : {}),
+    ...(author !== undefined ? { author } : {}),
+    ...(language !== undefined ? { language } : {}),
     epubVersion: (pkg && attr(pkg, 'version')) || '2.0',
   };
 }
@@ -225,7 +267,19 @@ function readNcx(source: string, ncxPath: string): TocEntry[] {
  * NO attributes survive — the rendered HTML carries no href, src or handler, so
  * book content cannot reach anything outside the paragraph it lives in.
  */
-const INLINE_KEEP = new Set(['em', 'i', 'strong', 'b', 'sup', 'sub', 'code', 'cite', 'q', 'small', 'u']);
+const INLINE_KEEP = new Set([
+  'em',
+  'i',
+  'strong',
+  'b',
+  'sup',
+  'sub',
+  'code',
+  'cite',
+  'q',
+  'small',
+  'u',
+]);
 
 function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -239,8 +293,8 @@ function escapeHtml(s: string): string {
 function inlineHtml(node: AnyNode): string {
   let out = '';
   const walk = (n: AnyNode): void => {
-    if (n.type === 'text') {
-      out += escapeHtml((n as unknown as { data: string }).data);
+    if (isText(n)) {
+      out += escapeHtml(n.data);
       return;
     }
     if (!isElement(n)) return;
@@ -253,10 +307,12 @@ function inlineHtml(node: AnyNode): string {
     const emitted = isNoteref ? 'noteref' : tag;
     const keep = isNoteref || INLINE_KEEP.has(tag);
     if (keep) out += `<${emitted}>`;
-    for (const child of (n.children ?? []) as AnyNode[]) walk(child);
+    for (const child of n.children) walk(child);
     if (keep) out += `</${emitted}>`;
   };
-  for (const child of ('children' in node ? (node.children as AnyNode[]) ?? [] : [])) walk(child);
+  if ('children' in node) {
+    for (const child of node.children) walk(child);
+  }
   return out.replace(/\s+/g, ' ').trim();
 }
 
@@ -274,11 +330,60 @@ const DANGLING = /[,;\u2013\u2014-]\s*$/;
  * converter, not by the author.
  */
 const FUNCTION_WORDS = new Set([
-  'the', 'a', 'an', 'and', 'or', 'but', 'of', 'in', 'to', 'for', 'with', 'at',
-  'by', 'from', 'as', 'is', 'was', 'were', 'are', 'be', 'been', 'that', 'which',
-  'who', 'his', 'her', 'its', 'their', 'this', 'these', 'those', 'on', 'into',
-  'than', 'then', 'when', 'while', 'if', 'not', 'no', 'so', 'he', 'she', 'they',
-  'it', 'you', 'we', 'i', 'him', 'them', 'us', 'my', 'your', 'our',
+  'the',
+  'a',
+  'an',
+  'and',
+  'or',
+  'but',
+  'of',
+  'in',
+  'to',
+  'for',
+  'with',
+  'at',
+  'by',
+  'from',
+  'as',
+  'is',
+  'was',
+  'were',
+  'are',
+  'be',
+  'been',
+  'that',
+  'which',
+  'who',
+  'his',
+  'her',
+  'its',
+  'their',
+  'this',
+  'these',
+  'those',
+  'on',
+  'into',
+  'than',
+  'then',
+  'when',
+  'while',
+  'if',
+  'not',
+  'no',
+  'so',
+  'he',
+  'she',
+  'they',
+  'it',
+  'you',
+  'we',
+  'i',
+  'him',
+  'them',
+  'us',
+  'my',
+  'your',
+  'our',
 ]);
 
 function lastWord(text: string): string {
@@ -310,26 +415,26 @@ function joinWrappedLines(blocks: Block[]): Block[] {
   const out: Block[] = [];
   for (const block of blocks) {
     const prev = out[out.length - 1];
-    const structurallyJoinable =
+    if (
       prev !== undefined &&
-      prev.heading === 0 && block.heading === 0 &&
-      prev.image === undefined && block.image === undefined &&
-      prev.tag === 'p' && block.tag === 'p' &&
+      prev.heading === 0 &&
+      block.heading === 0 &&
+      prev.image === undefined &&
+      block.image === undefined &&
+      prev.tag === 'p' &&
+      block.tag === 'p' &&
       prev.path === block.path &&
-      prev.text.length > 0 && block.text.length > 0 &&
+      prev.text.length > 0 &&
+      block.text.length > 0 &&
       !isDisplayLine(prev.text) &&
-      !TERMINAL.test(prev.text);
-
-    const continues =
-      structurallyJoinable &&
+      !TERMINAL.test(prev.text) &&
       (/^[a-z]/.test(block.text) ||
-        DANGLING.test(prev!.text) ||
-        FUNCTION_WORDS.has(lastWord(prev!.text)));
-
-    if (continues) {
-      prev!.text = `${prev!.text} ${block.text}`;
-      prev!.html = `${prev!.html} ${block.html}`;
-      prev!.ids.push(...block.ids);
+        DANGLING.test(prev.text) ||
+        FUNCTION_WORDS.has(lastWord(prev.text)))
+    ) {
+      prev.text = `${prev.text} ${block.text}`;
+      prev.html = `${prev.html} ${block.html}`;
+      prev.ids.push(...block.ids);
     } else {
       out.push(block);
     }
@@ -375,7 +480,7 @@ function collectBlocks(source: string, path: string, spineIndex: number, out: Bl
 
   // An id on <body> addresses the start of the document, and books converted
   // from Word anchor whole chapters there. Missing it loses every such cut.
-  const bodyId = body.type === 'tag' ? attr(body as Element, 'id') : undefined;
+  const bodyId = isElement(body) ? attr(body, 'id') : undefined;
   if (bodyId) pendingIds.push(bodyId);
 
   const emit = (el: Element, tag: string): void => {
@@ -387,14 +492,13 @@ function collectBlocks(source: string, path: string, spineIndex: number, out: Bl
     const figure = findAll(el, 'img')[0] ?? findAll(el, 'image')[0];
     const src = figure ? (attr(figure, 'src') ?? attr(figure, 'href')) : undefined;
     if (!text && !ids.length && !src) return;
-    const headingMatch = /^h([1-6])$/.exec(tag);
     const alt = figure ? attr(figure, 'alt') : undefined;
     out.push({
       spineIndex,
       path,
       ids,
       tag,
-      heading: headingMatch ? Number(headingMatch[1]) : 0,
+      heading: headingLevel(tag),
       text,
       html: inlineHtml(el),
       ...(src !== undefined ? { image: resolvePath(path, splitHref(src).path) } : {}),
@@ -404,14 +508,12 @@ function collectBlocks(source: string, path: string, spineIndex: number, out: Bl
   };
 
   const hasBlockChild = (el: Element): boolean =>
-    (el.children ?? []).some(
-      (c) => c.type === 'tag' && BLOCK_TAGS.has((c as Element).name.toLowerCase()),
-    );
+    el.children.some((child) => isElement(child) && BLOCK_TAGS.has(child.name.toLowerCase()));
 
-  const walk = (node: Element): void => {
-    for (const child of node.children ?? []) {
-      if (child.type !== 'tag') continue;
-      const el = child as Element;
+  const walk = (node: Element | Document): void => {
+    for (const child of node.children) {
+      if (!isElement(child)) continue;
+      const el = child;
       const tag = el.name.toLowerCase();
       if (tag === 'script' || tag === 'style' || tag === 'head') continue;
 
@@ -428,11 +530,31 @@ function collectBlocks(source: string, path: string, spineIndex: number, out: Bl
       }
     }
   };
-  walk(body as Element);
+  walk(body);
 
   // Ids trailing at the end of a document belong to its last block.
-  if (pendingIds.length && out.length) {
-    const last = out[out.length - 1]!;
-    if (last.path === path) last.ids.push(...pendingIds);
+  const last = out[out.length - 1];
+  if (pendingIds.length && last !== undefined && last.path === path) {
+    last.ids.push(...pendingIds);
+  }
+}
+
+/** h1–h6, or 0. A tag outside that set is not a heading, whatever its name. */
+function headingLevel(tag: string): HeadingLevel {
+  switch (tag) {
+    case 'h1':
+      return 1;
+    case 'h2':
+      return 2;
+    case 'h3':
+      return 3;
+    case 'h4':
+      return 4;
+    case 'h5':
+      return 5;
+    case 'h6':
+      return 6;
+    default:
+      return 0;
   }
 }

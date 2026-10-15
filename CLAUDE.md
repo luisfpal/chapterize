@@ -5,6 +5,10 @@ and export them for a model. The invariant: **one chapter at a time**, because a
 whole book does not fit in a useful context window (The 48 Laws of Power is
 ~320k tokens; one law is ~4–12k).
 
+Commands, the architecture map, and the rules the toolchain enforces live in
+[AGENTS.md](./AGENTS.md). This file is the domain. If a command here and a
+command there disagree, AGENTS.md is the one that runs.
+
 ## Mandatory Instructions
 
 1. **Git Workflow**
@@ -111,8 +115,9 @@ to need one, the block model is wrong and that is the thing to fix.
 
 ## Verification
 
-`npm test` runs against **real EPUBs**, not synthetic fixtures — every parser bug
-so far was invisible to hand-written ones. Set `CHAPTERIZE_FIXTURES` to a
-colon-separated list of directories holding `.epub` files. Without it the
-structural tests skip and the unit tests still run, so a fresh clone is green.
-No shelf path belongs in this repository.
+`npm test` runs the unit tests and then `scripts/verify.mjs`. The unit tests
+prefer **real EPUBs** — every parser bug so far was invisible to hand-written
+ones. Set `CHAPTERIZE_FIXTURES` to a colon-separated list of directories holding
+`.epub` files. Without it those tests skip. `verify` builds one synthetic book
+for the shapes named above; it does not replace the shelf. A fresh clone is
+green either way. No shelf path belongs in this repository.

@@ -1,4 +1,5 @@
 import type { Block, Chapter } from './types.js';
+import { must } from './must.js';
 
 /** Words, counted the way a reader would. */
 export function countWords(text: string): number {
@@ -13,10 +14,10 @@ export function countWords(text: string): number {
  * 2019). Every serious reader — Kindle, Kobo, Apple Books, Foliate — surfaces
  * time rather than length, because time is the thing a reader actually budgets.
  */
-export function readingMinutes(words: number, wpm = 238): number {
-  // A book split before word counts existed has no `words` field, and NaN
-  // propagates into the interface as "~NaN min" rather than failing loudly.
-  if (!Number.isFinite(words) || words <= 0) return 1;
+export function readingMinutes(words: number | undefined, wpm = 238): number {
+  // A book split before word counts existed has no `words` field. `undefined`
+  // is that state. NaN used to reach the shelf as "~NaN min".
+  if (words === undefined || !Number.isFinite(words) || words <= 0) return 1;
   return Math.max(1, Math.round(words / wpm));
 }
 
@@ -80,15 +81,19 @@ export function inlineMarkdown(html: string): string {
     (_all, tag: string, lead: string, inner: string, trail: string) =>
       inner ? `${lead}<${tag}>${inner}</${tag}>${trail}` : `${lead}${trail}`,
   );
-  return shifted
-    .replace(/<\/?(em|i)>/g, '*')
-    .replace(/<\/?(strong|b)>/g, '**')
-    .replace(/<[^>]+>/g, '')
-    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
-    // Shifting whitespace out of a marker can leave it beside a space that was
-    // already there; block text is whitespace-collapsed, so collapse again.
-    .replace(/ {2,}/g, ' ')
-    .trim();
+  return (
+    shifted
+      .replace(/<\/?(em|i)>/g, '*')
+      .replace(/<\/?(strong|b)>/g, '**')
+      .replace(/<[^>]+>/g, '')
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      // Shifting whitespace out of a marker can leave it beside a space that was
+      // already there; block text is whitespace-collapsed, so collapse again.
+      .replace(/ {2,}/g, ' ')
+      .trim()
+  );
 }
 
 export interface RenderOptions {
@@ -122,7 +127,7 @@ export function renderChapter(
   let counter = 0;
 
   for (let i = chapter.start; i < chapter.end; i++) {
-    const block = blocks[i]!;
+    const block = must(blocks[i], `block ${i}`);
     let numbers: number[] | undefined;
     if (block.noterefs?.length) {
       numbers = block.noterefs.map((ref) => {
@@ -145,12 +150,15 @@ export function renderChapter(
   const attribution = options.author
     ? `${options.bookTitle} — ${options.author}`
     : options.bookTitle;
-  const length = options.minutes !== undefined
-    ? `~${options.minutes} min read`
-    : `${chapter.chars.toLocaleString()} characters`;
-  return [
-    `# ${title}`,
-    `_${attribution} · ${chapter.index + 1} of ${options.totalChapters} · ${length}_`,
-    prose,
-  ].join('\n\n') + '\n';
+  const length =
+    options.minutes !== undefined
+      ? `~${options.minutes} min read`
+      : `${chapter.chars.toLocaleString()} characters`;
+  return (
+    [
+      `# ${title}`,
+      `_${attribution} · ${chapter.index + 1} of ${options.totalChapters} · ${length}_`,
+      prose,
+    ].join('\n\n') + '\n'
+  );
 }

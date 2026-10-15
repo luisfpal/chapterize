@@ -10,9 +10,7 @@ import { join } from 'node:path';
  * something a public repository should carry. Point CHAPTERIZE_FIXTURES at a
  * directory of .epub files to run these tests; without it they skip.
  */
-const ROOTS = (process.env['CHAPTERIZE_FIXTURES'] ?? '')
-  .split(':')
-  .filter(Boolean);
+const ROOTS = (process.env['CHAPTERIZE_FIXTURES'] ?? '').split(':').filter(Boolean);
 
 /** Scratch copies made during calibration would otherwise be counted twice. */
 const EXCLUDE = /_chapterize_experiment/;
@@ -35,7 +33,10 @@ export function allBooks(): string[] {
     for (const path of walk(root)) {
       // The library holds a copy of each imported book; count each title once.
       const key = path.split('/').pop() ?? path;
-      if (key === 'book.epub') { out.push(path); continue; }
+      if (key === 'book.epub') {
+        out.push(path);
+        continue;
+      }
       if (seen.has(key)) continue;
       seen.add(key);
       out.push(path);
