@@ -137,7 +137,7 @@ describe('where the bundle goes', () => {
     writeFileSync(junk, 'not a zip');
     const bad = io(home, home);
     expect(await execute([junk, '--out', path.join(home, 'out')], bad)).toBe(1);
-    expect(bad.err).toMatch(/Not a readable EPUB/);
+    expect(bad.err).toMatch(/Cannot open this file as an EPUB/);
   });
 });
 
