@@ -4,7 +4,8 @@
   "type": "module",
   "workspaces": ["packages/*", "apps/*"],
   "scripts": {
-    "test": "npm run test --workspace @chapterize/core",
-    "typecheck": "npm run typecheck --workspaces --if-present"
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "cli": "npm run cli --workspace @chapterize/cli --"
   }
 }
