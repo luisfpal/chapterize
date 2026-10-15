@@ -5,7 +5,7 @@ import {
   toChapters, withHighlights, type Book,
 } from '../src/index.js';
 import {
-  duplicateImageBook, enumeratorBook, epubZip, harborBook,
+  duplicateImageBook, enumeratorBook, epubZip, harborBook, pairedFigureBook,
   missingFragmentBook, ncxBook, numberedNoteBook, pageListOnlyBook,
   partDividerBook, shortHeadingBook, tocAfterPageList, wrappedNavBook,
 } from './fixtures/build-epub.js';
@@ -182,6 +182,19 @@ describe('synthetic books through split, markdown, and highlights', () => {
     expect(book.images.get('OEBPS/b/mark.png')).toEqual(new Uint8Array([4, 5, 6]));
   });
 
+  it('exports both figures when one paragraph holds two', () => {
+    const { book, files } = pipeline(pairedFigureBook());
+    expect([...book.images.keys()].sort()).toEqual([
+      'OEBPS/img/depth.png',
+      'OEBPS/img/tide.png',
+    ]);
+    const md = files.map((f) => f.markdown).join('\n');
+    expect(md).toContain('before sailing.');
+    expect(md).toContain('![Tide](images/OEBPS_img_tide.png)');
+    expect(md).toContain('![Depth](images/OEBPS_img_depth.png)');
+    expect(book.images.get('OEBPS/img/depth.png')).toEqual(new Uint8Array([2]));
+  });
+
   it('appends a recovered name only when the label is a bare enumerator', () => {
     const { chapters } = pipeline(enumeratorBook());
     expect(chapters.map((c) => c.title)).toEqual([
@@ -217,7 +230,7 @@ describe('synthetic books through split, markdown, and highlights', () => {
     for (const bytes of [
       harborBook(), pageListOnlyBook(), tocAfterPageList('unlabeled'),
       wrappedNavBook(), missingFragmentBook(), shortHeadingBook(),
-      numberedNoteBook(), duplicateImageBook(), enumeratorBook(),
+      numberedNoteBook(), duplicateImageBook(), pairedFigureBook(), enumeratorBook(),
       partDividerBook(), ncxBook(),
     ]) {
       const book = openEpub(bytes);

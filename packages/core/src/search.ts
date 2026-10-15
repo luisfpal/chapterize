@@ -58,7 +58,11 @@ export function search(
 ): Hit[] {
   const raw = query.trim();
   if (raw.length < 2) return [];
-  const needle = raw.toLowerCase();
+  // Fold the query the same way as the block. Whole-string toLowerCase and a
+  // per-character fold disagree on a few letters, and the match would then
+  // highlight a span the query never named.
+  const needle = foldWithMap(raw).folded;
+  if (!needle) return [];
 
   const hits: Hit[] = [];
   for (let b = 0; b < blocks.length && hits.length < limit; b++) {

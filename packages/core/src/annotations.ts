@@ -49,7 +49,12 @@ interface Anchored {
 
 /** Index of `quote` in `text` closest to `prefer`, or -1 when it is absent. */
 function nearestOccurrence(text: string, quote: string, prefer: number): number {
-  if (text.slice(prefer, prefer + quote.length) === quote) return prefer;
+  // `String.slice` treats a negative start as an offset from the end, so a
+  // corrupt highlight at -3 can "match" and be stored there. Offsets are
+  // indexes into the block, and a negative one paints the wrong words.
+  const origin = Number.isFinite(prefer) ? Math.trunc(prefer) : 0;
+  const clamped = Math.min(text.length, Math.max(0, origin));
+  if (text.slice(clamped, clamped + quote.length) === quote) return clamped;
   let best = -1;
   let from = 0;
   while (from <= text.length) {
@@ -79,14 +84,21 @@ export function reanchorAnnotations<T extends Anchored>(
   let orphaned = 0;
   for (const note of notes) {
     const quote = note.quote;
+    // A highlight whose quote is not text cannot be placed, and it must not
+    // be deleted either: resplit rewrites the file from what this returns.
+    if (typeof quote !== 'string') {
+      kept.push(note);
+      continue;
+    }
     if (!quote.trim()) {
       orphaned++;
       continue;
     }
+    const origin = Number.isFinite(note.block) ? note.block : 0;
     const order = blocks
       .map((block, at) => ({ block, at }))
       .filter(({ block }) => block.text.includes(quote))
-      .sort((a, b) => Math.abs(a.at - note.block) - Math.abs(b.at - note.block)
+      .sort((a, b) => Math.abs(a.at - origin) - Math.abs(b.at - origin)
         || a.at - b.at);
     const hit = order[0];
     if (!hit) {

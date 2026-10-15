@@ -403,6 +403,21 @@ function collectNoterefs(el: Element, path: string): NoteRef[] {
   return out;
 }
 
+/** Every figure in document order, including the element itself when it is one. */
+function figuresIn(el: Element, path: string): { image: string; alt?: string }[] {
+  const out: { image: string; alt?: string }[] = [];
+  for (const figure of [...findAll(el, 'img'), ...findAll(el, 'image')]) {
+    const src = attr(figure, 'src') ?? attr(figure, 'href');
+    if (!src) continue;
+    const alt = attr(figure, 'alt');
+    out.push({
+      image: resolvePath(path, splitHref(src).path),
+      ...(alt ? { alt } : {}),
+    });
+  }
+  return out;
+}
+
 /** True when a descendant is itself a block, so this element is a container. */
 function hasBlockDescendant(el: Element): boolean {
   for (const child of el.children ?? []) {
@@ -471,11 +486,10 @@ function collectBlocks(source: string, path: string, spineIndex: number, out: Bl
     const ids = [...pendingIds, ...(own ? [own] : []), ...descendantIds(el)];
     pendingIds = [];
     const noterefs = collectNoterefs(el, path);
-    const figure = findAll(el, 'img')[0] ?? findAll(el, 'image')[0];
-    const src = figure ? (attr(figure, 'src') ?? attr(figure, 'href')) : undefined;
-    if (!text && !ids.length && !src) return;
+    const figures = figuresIn(el, path);
+    if (!text && !ids.length && !figures.length) return;
     const headingMatch = /^h([1-6])$/.exec(tag);
-    const alt = figure ? attr(figure, 'alt') : undefined;
+    const first = figures[0];
     out.push({
       spineIndex,
       path,
@@ -484,10 +498,25 @@ function collectBlocks(source: string, path: string, spineIndex: number, out: Bl
       heading: headingMatch ? Number(headingMatch[1]) : 0,
       text,
       html: inlineHtml(el),
-      ...(src !== undefined ? { image: resolvePath(path, splitHref(src).path) } : {}),
-      ...(alt ? { alt } : {}),
+      ...(first ? { image: first.image } : {}),
+      ...(first?.alt ? { alt: first.alt } : {}),
       ...(noterefs.length ? { noterefs } : {}),
     });
+    // A block carries one image. Further figures in the same paragraph used
+    // to vanish, so a page with two charts exported the first and lost the rest.
+    for (const extra of figures.slice(1)) {
+      out.push({
+        spineIndex,
+        path,
+        ids: [],
+        tag: 'figure',
+        heading: 0,
+        text: '',
+        html: '',
+        image: extra.image,
+        ...(extra.alt ? { alt: extra.alt } : {}),
+      });
+    }
   };
 
   /** A sentence that lived directly in a container, beside real block children. */

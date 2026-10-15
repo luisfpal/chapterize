@@ -40,17 +40,23 @@ export function chapterFilename(chapter: Chapter, title: string): string {
 /**
  * Filename for an image exported beside the chapter.
  *
- * The basename alone collides: `chapters/a/mark.png` and `plates/b/mark.png`
- * both become `mark.png`, and the second write replaces the first, so two
- * figures render as one. The directory stays in the name, with no slashes,
- * because the writer refuses a path inside a filename.
+ * The basename alone collides, and so does collapsing every unsafe character
+ * to the same underscore: `a/b.png` and `a..b.png` both became `a_b.png`, and
+ * the second write replaced the first. Slashes become underscores, so
+ * `OEBPS/img/chart.png` stays readable. A run of dots, and any other
+ * character, is written as hex. The result has no slash and no `..`.
  */
 export function imageFilename(path: string): string {
-  const clean = path
-    .replace(/[^A-Za-z0-9.]+/g, '_')
-    .replace(/\.{2,}/g, '_')
-    .replace(/^_+|_+$/g, '');
-  return clean || 'image';
+  let out = '';
+  for (const ch of path) {
+    if (/[A-Za-z0-9]/.test(ch)) out += ch;
+    else if (ch === '/') out += '_';
+    else if (ch === '.') out += '.';
+    else out += `_${(ch.codePointAt(0) ?? 0).toString(16)}_`;
+  }
+  out = out.replace(/\.{2,}/g, (dots) => `_${'2e'.repeat(dots.length)}_`);
+  out = out.replace(/^_+|_+$/g, '');
+  return out || 'image';
 }
 
 /** `<noteref>*</noteref>` -> `[^3]`, numbered per chapter. */

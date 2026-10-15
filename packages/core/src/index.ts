@@ -25,4 +25,4 @@ export {
 } from './annotations.js';
 export { search, type Hit } from './search.js';
 export { readerCommand, type ReaderCommand, type ReaderKeyState } from './reader.js';
-export { carryBookState, parseStoredJson } from './library.js';
+export { carryBookState, parseStoredJson, parseAnnotationList, tryParseBookIndex } from './library.js';

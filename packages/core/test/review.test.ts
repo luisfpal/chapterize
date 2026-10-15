@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  annotationRange, carryBookState, parseStoredJson, readerCommand,
-  reanchorAnnotations, search, type Block,
+  annotationRange, carryBookState, imageFilename, parseAnnotationList, parseStoredJson,
+  readerCommand, reanchorAnnotations, search, tryParseBookIndex, type Block,
 } from '../src/index.js';
 
 function block(text: string): Block {
@@ -56,6 +56,26 @@ describe('a highlight stays on the words it was made on', () => {
     );
     expect(kept).toEqual([]);
     expect(orphaned).toBe(1);
+  });
+
+  it('does not store a negative offset from a corrupt start', () => {
+    const text = 'cat and cat';
+    const { kept, orphaned } = reanchorAnnotations([{ text }], [{
+      block: 0, quote: 'cat', start: -3, end: 0,
+    }]);
+    expect(orphaned).toBe(0);
+    expect(kept[0]!.start).toBeGreaterThanOrEqual(0);
+    expect(text.slice(kept[0]!.start, kept[0]!.end)).toBe('cat');
+  });
+
+  it('keeps a highlight whose quote is not text, instead of deleting it', () => {
+    const note = { block: 0, quote: 12, start: 0, end: 2 };
+    const { kept, orphaned } = reanchorAnnotations(
+      [{ text: '12 men remained' }],
+      [note as unknown as { block: number; quote: string; start: number; end: number }],
+    );
+    expect(orphaned).toBe(0);
+    expect(kept).toEqual([note]);
   });
 
   it('counts a quote the new text no longer contains', () => {
@@ -118,6 +138,24 @@ describe('reader keys', () => {
     expect(readerCommand('m', { ...idle, editing: true }).kind).toBe('ignore');
     expect(readerCommand('u', { ...idle, editing: true }).kind).toBe('undo-edit');
   });
+
+  it('does not turn the page when Command, Control, or Alt is held', () => {
+    expect(readerCommand('n', idle, true).kind).toBe('ignore');
+    expect(readerCommand('Escape', { ...idle, lookup: true }, true).kind).toBe('close-lookup');
+  });
+});
+
+describe('exported figure names', () => {
+  it('keeps a readable name and does not let two different paths share it', () => {
+    expect(imageFilename('OEBPS/img/chart.png')).toBe('OEBPS_img_chart.png');
+    expect(imageFilename('a/b.png')).not.toBe(imageFilename('a..b.png'));
+    expect(imageFilename('OEBPS/img/şəkil.png')).not.toBe(imageFilename('OEBPS/img/çəkil.png'));
+    for (const path of ['a/b.png', 'a..b.png', '../secret.png', 'OEBPS/img/şəkil.png']) {
+      const name = imageFilename(path);
+      expect(name).not.toMatch(/[\\/]/);
+      expect(name).not.toContain('..');
+    }
+  });
 });
 
 describe('a book folder across a re-split', () => {
@@ -146,6 +184,34 @@ describe('a book folder across a re-split', () => {
     expect(() => parseStoredJson('{', '/library/Harbor/annotations.json'))
       .toThrow(/annotations\.json is not valid JSON/);
     expect(() => parseStoredJson('{', '/library/Harbor/annotations.json'))
+      .toThrow(/not modified/);
+  });
+
+  it('reports one bad index without throwing, and refuses a file that is not a list of highlights', () => {
+    const bad = tryParseBookIndex('{', '/library/Harbor/index.json');
+    expect(bad.ok).toBe(false);
+    if (!bad.ok) expect(bad.error).toMatch(/Harbor\/index\.json/);
+
+    const list = tryParseBookIndex('[]', '/library/Harbor/index.json');
+    expect(list.ok).toBe(false);
+
+    const empty = tryParseBookIndex('{"title":"Harbor"}', '/library/Harbor/index.json');
+    expect(empty.ok).toBe(false);
+
+    const ok = tryParseBookIndex(
+      '{"title":"Harbor","chapters":[{"title":"Salt"}]}',
+      '/library/Harbor/index.json',
+    );
+    expect(ok.ok).toBe(true);
+    if (ok.ok) {
+      expect(ok.index.title).toBe('Harbor');
+      expect(ok.index.finished).toEqual([]);
+    }
+
+    expect(parseAnnotationList('[]', 'annotations.json')).toEqual([]);
+    expect(() => parseAnnotationList('{}', '/library/Harbor/annotations.json'))
+      .toThrow(/not a list of highlights/);
+    expect(() => parseAnnotationList('{}', '/library/Harbor/annotations.json'))
       .toThrow(/not modified/);
   });
 });

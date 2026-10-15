@@ -1,7 +1,7 @@
 import {
   openEpub, detect, toChapters, deriveTitles, renderChapter, chapterFilename,
   mergeStubs, imageFilename, countWords, readingMinutes, PARSER_VERSION, EpubError,
-  reanchorAnnotations, carryBookState, parseStoredJson,
+  reanchorAnnotations, carryBookState, parseAnnotationList, tryParseBookIndex,
 } from '@chapterize/core';
 import type { CutPoint } from '@chapterize/core';
 import {
@@ -129,7 +129,11 @@ export async function ingest(
 export async function load(dir: string) {
   const indexText = await native.readText(`${dir}/index.json`);
   if (!indexText) throw new Error(`No index.json in ${dir}`);
-  let index = parseStoredJson<BookIndex>(indexText, `${dir}/index.json`);
+  // Same check as the shelf. An index with no chapter list must fail here,
+  // before the reader assumes `finished` and `chapters` are arrays.
+  const parsed = tryParseBookIndex(indexText, `${dir}/index.json`);
+  if (!parsed.ok) throw new Error(parsed.error);
+  let index = parsed.index as BookIndex;
 
   const bytes = bytesOf(await native.readFile(`${dir}/${index.epubFile}`));
   const book = openEpub(bytes);
@@ -141,7 +145,9 @@ export async function load(dir: string) {
     await resplit(dir);
     const refreshed = await native.readText(`${dir}/index.json`);
     if (!refreshed) throw new Error(`Re-split of ${dir} did not write index.json.`);
-    index = parseStoredJson<BookIndex>(refreshed, `${dir}/index.json`);
+    const again = tryParseBookIndex(refreshed, `${dir}/index.json`);
+    if (!again.ok) throw new Error(again.error);
+    index = again.index as BookIndex;
   }
 
   // Libraries split before word counts existed carry no `words`, which the
@@ -158,9 +164,20 @@ export async function load(dir: string) {
   }
 
   const annText = await native.readText(`${dir}/annotations.json`);
-  const annotations = annText
-    ? parseStoredJson<Annotation[]>(annText, `${dir}/annotations.json`)
-    : [];
+  const annotations = (annText
+    ? parseAnnotationList(annText, `${dir}/annotations.json`)
+    : []
+  ).filter((note): note is Annotation => {
+    if (!note || typeof note !== 'object') return false;
+    const item = note as Partial<Annotation>;
+    const start = item.start;
+    const end = item.end;
+    return typeof item.quote === 'string' && item.quote.length > 0
+      && typeof item.id === 'string'
+      && Number.isFinite(item.block) && Number.isFinite(start) && Number.isFinite(end)
+      && start !== undefined && end !== undefined
+      && start >= 0 && end >= start;
+  });
 
   // Object URLs, so the reader shows figures without inlining megabytes of
   // base64 into the DOM. Revoked when the book is closed.
@@ -185,12 +202,15 @@ export async function load(dir: string) {
  */
 export async function resplit(dir: string): Promise<IngestResult & { orphaned: number }> {
   const indexText = await native.readText(`${dir}/index.json`);
-  const previous = indexText
-    ? parseStoredJson<BookIndex>(indexText, `${dir}/index.json`)
-    : undefined;
+  let previous: BookIndex | undefined;
+  if (indexText) {
+    const parsed = tryParseBookIndex(indexText, `${dir}/index.json`);
+    if (!parsed.ok) throw new Error(parsed.error);
+    previous = parsed.index as BookIndex;
+  }
   const existingText = await native.readText(`${dir}/annotations.json`);
   const existing: Annotation[] = existingText
-    ? parseStoredJson<Annotation[]>(existingText, `${dir}/annotations.json`)
+    ? parseAnnotationList(existingText, `${dir}/annotations.json`) as Annotation[]
     : [];
 
   const result = await ingest(`${dir}/book.epub`, dir, { copySource: false, into: dir });

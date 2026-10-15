@@ -37,3 +37,74 @@ export function parseStoredJson<T>(text: string, what: string): T {
     );
   }
 }
+
+/**
+ * One shelf entry. A file that does not parse, or that is not a book, is an
+ * error string rather than a throw: the caller still opens every other book.
+ * One corrupt `index.json` used to reject the whole library with "Unexpected
+ * token" and no path.
+ */
+export function tryParseBookIndex(
+  text: string,
+  what: string,
+): { ok: true; index: { title: string; chapters: unknown[]; finished: unknown[] } }
+  | { ok: false; error: string } {
+  let value: unknown;
+  try {
+    value = parseStoredJson<unknown>(text, what);
+  } catch (cause) {
+    return { ok: false, error: cause instanceof Error ? cause.message : String(cause) };
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {
+      ok: false,
+      error:
+        `${what} is not a book index. The file was not modified. ` +
+        'Restore it from a backup, or correct it by hand, then open the library again.',
+    };
+  }
+  const record = value as Record<string, unknown>;
+  if (typeof record.title !== 'string' || !record.title.trim()) {
+    return {
+      ok: false,
+      error:
+        `${what} has no title, so it cannot be shown on the shelf. The file was not modified. ` +
+        'Restore it from a backup, or correct it by hand.',
+    };
+  }
+  if (!Array.isArray(record.chapters) || record.chapters.some((chapter) => !chapter || typeof chapter !== 'object')) {
+    return {
+      ok: false,
+      error:
+        `${what} has no chapter list. The file was not modified. ` +
+        'Restore it from a backup, or correct it by hand, then open the library again.',
+    };
+  }
+  // The shelf reads these as arrays. An index written by an older build, or
+  // repaired by hand, may omit them; inventing an empty one here is display
+  // only — the file is not rewritten.
+  if (!Array.isArray(record.finished)) record.finished = [];
+  if (!record.progress || typeof record.progress !== 'object' || Array.isArray(record.progress)) {
+    record.progress = {};
+  }
+  return {
+    ok: true,
+    index: record as { title: string; chapters: unknown[]; finished: unknown[] },
+  };
+}
+
+/**
+ * Highlights are a list. `{}` is valid JSON and still not a list; treating it
+ * as one crashes the reader with "filter is not a function" and never says
+ * which file to repair.
+ */
+export function parseAnnotationList(text: string, what: string): unknown[] {
+  const value = parseStoredJson<unknown>(text, what);
+  if (!Array.isArray(value)) {
+    throw new Error(
+      `${what} is not a list of highlights. The file was not modified. ` +
+      'Restore it from a backup, or correct it by hand, then open the book again.',
+    );
+  }
+  return value;
+}

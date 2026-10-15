@@ -31,7 +31,11 @@ export type ReaderCommand =
   | { kind: 'text-size'; delta: number }
   | { kind: 'ignore' };
 
-export function readerCommand(key: string, state: ReaderKeyState): ReaderCommand {
+export function readerCommand(key: string, state: ReaderKeyState, modified = false): ReaderCommand {
+  // Command, Control, and Alt belong to the system (copy, close, a shortcut).
+  // Escape still dismisses whatever is open; a modified letter must not also
+  // turn the page.
+  if (modified && key !== 'Escape') return { kind: 'ignore' };
   if (key === 'n') return { kind: 'chapter', delta: 1 };
   if (key === 'p') return { kind: 'chapter', delta: -1 };
   if (key === 'j') return { kind: 'scroll', delta: 120 };

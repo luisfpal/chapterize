@@ -7,14 +7,15 @@
  * sentence beside an image. The text is invented. Nothing here is from a
  * published book.
  *
- *   npx vite-node packages/core/test/fixtures/build-epub.ts
+ *   node packages/core/test/fixtures/build-epub.ts
  *
- * writes them under test/fixtures/out/ so a reader can open one. The tests
+ * writes them under test/fixtures/out/ so a reader can open one. vite-node
+ * does not put the script on argv, so that command writes nothing. The tests
  * call the same builders, so the files on disk cannot drift from the suite.
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { strToU8, zipSync } from 'fflate';
 
 const CONTAINER = `<?xml version="1.0"?>
@@ -319,6 +320,23 @@ export function duplicateImageBook(): Uint8Array {
   });
 }
 
+/** Two charts in one paragraph. The second used to be dropped. */
+export function pairedFigureBook(): Uint8Array {
+  const story = xhtml(`
+    <h1>Charts</h1>
+    <p>See <img src="img/tide.png" alt="Tide"/> and <img src="img/depth.png" alt="Depth"/> before sailing.</p>
+    <p>${long('Both charts belong on the page.')}</p>
+  `);
+  return pack({
+    title: 'Two Charts',
+    docs: [{ id: 'story', href: 'story.xhtml', html: story }],
+    extras: {
+      'OEBPS/img/tide.png': new Uint8Array([1]),
+      'OEBPS/img/depth.png': new Uint8Array([2]),
+    },
+  });
+}
+
 /** "Chapter 1" is an enumerator. "Iron" is already a title. */
 export function enumeratorBook(): Uint8Array {
   const story = xhtml(`
@@ -408,12 +426,16 @@ export const FIXTURES: Record<string, () => Uint8Array> = {
   'pamphlet.epub': shortHeadingBook,
   'numbered-note.epub': numberedNoteBook,
   'two-marks.epub': duplicateImageBook,
+  'two-charts.epub': pairedFigureBook,
   'enumerated.epub': enumeratorBook,
   'part-divider.epub': partDividerBook,
   'ncx.epub': ncxBook,
 };
 
-if (process.argv[1]?.includes('build-epub')) {
+// Importing this module from the suite must not write. The script is the
+// entry point only when node was asked to run it.
+const entry = process.argv[1];
+if (entry && import.meta.url === pathToFileURL(entry).href) {
   const out = join(dirname(fileURLToPath(import.meta.url)), 'out');
   mkdirSync(out, { recursive: true });
   for (const [name, build] of Object.entries(FIXTURES)) {

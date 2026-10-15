@@ -435,7 +435,7 @@ export function BookView({ book, onBack, onExport }: Props) {
         speaking: speech.speaking,
         note: note !== null,
         pending: pending !== null,
-      });
+      }, e.metaKey || e.ctrlKey || e.altKey);
       switch (command.kind) {
         case 'chapter': go(command.delta); break;
         case 'scroll': readerRef.current?.scrollBy({ top: command.delta }); break;
