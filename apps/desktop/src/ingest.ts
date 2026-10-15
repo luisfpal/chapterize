@@ -2,6 +2,7 @@ import {
   openEpub, detect, toChapters, deriveTitles, renderChapter, chapterFilename,
   mergeStubs, imageFilename, countWords, readingMinutes, PARSER_VERSION, EpubError,
   explainUnresolved,
+  reanchorAnnotations, carryBookState, parseAnnotationList, tryParseBookIndex,
 } from '@chapterize/core';
 import type { CutPoint } from '@chapterize/core';
 import {
@@ -32,7 +33,7 @@ export interface IngestResult {
 export async function ingest(
   epubPath: string,
   libraryDir: string,
-  options: { copySource?: boolean } = {},
+  options: { copySource?: boolean; into?: string } = {},
 ): Promise<IngestResult> {
   const bytes = bytesOf(await native.readFile(epubPath));
 
@@ -67,7 +68,11 @@ export async function ingest(
     );
   }
 
-  const dir = `${libraryDir}/${bookFolderName(book.metadata.title, book.metadata.author)}`;
+  // Re-splitting passes `into`: the folder already open. Recomputing the name
+  // from the title would write a second copy when the folder had been renamed,
+  // and slicing the path at '/' to find the library gets the parent wrong on
+  // Windows, where the separator is a backslash.
+  const dir = options.into ?? `${libraryDir}/${bookFolderName(book.metadata.title, book.metadata.author)}`;
   const files: OutputFile[] = [];
   const names: string[] = [];
   const wordCounts: number[] = [];
@@ -127,7 +132,11 @@ export async function ingest(
 export async function load(dir: string) {
   const indexText = await native.readText(`${dir}/index.json`);
   if (!indexText) throw new Error(`No index.json in ${dir}`);
-  let index = JSON.parse(indexText) as BookIndex;
+  // Same check as the shelf. An index with no chapter list must fail here,
+  // before the reader assumes `finished` and `chapters` are arrays.
+  const parsed = tryParseBookIndex(indexText, `${dir}/index.json`);
+  if (!parsed.ok) throw new Error(parsed.error);
+  let index = parsed.index as BookIndex;
 
   const bytes = bytesOf(await native.readFile(`${dir}/${index.epubFile}`));
   const book = openEpub(bytes);
@@ -136,9 +145,12 @@ export async function load(dir: string) {
   // Rebuild them now rather than putting a "Re-split" button in front of someone
   // who only wants to read.
   if (index.parserVersion !== PARSER_VERSION) {
-    await resplit(dir, dir.slice(0, dir.lastIndexOf('/')));
+    await resplit(dir);
     const refreshed = await native.readText(`${dir}/index.json`);
-    if (refreshed) index = JSON.parse(refreshed) as BookIndex;
+    if (!refreshed) throw new Error(`Re-split of ${dir} did not write index.json.`);
+    const again = tryParseBookIndex(refreshed, `${dir}/index.json`);
+    if (!again.ok) throw new Error(again.error);
+    index = again.index as BookIndex;
   }
 
   // Libraries split before word counts existed carry no `words`, which the
@@ -155,7 +167,20 @@ export async function load(dir: string) {
   }
 
   const annText = await native.readText(`${dir}/annotations.json`);
-  const annotations = annText ? JSON.parse(annText) : [];
+  const annotations = (annText
+    ? parseAnnotationList(annText, `${dir}/annotations.json`)
+    : []
+  ).filter((note): note is Annotation => {
+    if (!note || typeof note !== 'object') return false;
+    const item = note as Partial<Annotation>;
+    const start = item.start;
+    const end = item.end;
+    return typeof item.quote === 'string' && item.quote.length > 0
+      && typeof item.id === 'string'
+      && Number.isFinite(item.block) && Number.isFinite(start) && Number.isFinite(end)
+      && start !== undefined && end !== undefined
+      && start >= 0 && end >= start;
+  });
 
   // Object URLs, so the reader shows figures without inlining megabytes of
   // base64 into the DOM. Revoked when the book is closed.
@@ -178,31 +203,33 @@ export async function load(dir: string) {
  * stored alongside the offsets in the first place. Anything whose text no longer
  * appears is reported rather than silently relocated.
  */
-export async function resplit(dir: string, libraryDir: string): Promise<IngestResult & { orphaned: number }> {
+export async function resplit(dir: string): Promise<IngestResult & { orphaned: number }> {
+  const indexText = await native.readText(`${dir}/index.json`);
+  let previous: BookIndex | undefined;
+  if (indexText) {
+    const parsed = tryParseBookIndex(indexText, `${dir}/index.json`);
+    if (!parsed.ok) throw new Error(parsed.error);
+    previous = parsed.index as BookIndex;
+  }
   const existingText = await native.readText(`${dir}/annotations.json`);
-  const existing: Annotation[] = existingText ? JSON.parse(existingText) : [];
+  const existing: Annotation[] = existingText
+    ? parseAnnotationList(existingText, `${dir}/annotations.json`) as Annotation[]
+    : [];
 
-  const result = await ingest(`${dir}/book.epub`, libraryDir, { copySource: false });
+  const result = await ingest(`${dir}/book.epub`, dir, { copySource: false, into: dir });
+
+  if (previous) {
+    const carried = carryBookState(previous, result.index);
+    await native.writeText(`${result.dir}/index.json`, JSON.stringify(carried, null, 2));
+    result.index = carried;
+  }
 
   if (!existing.length) return { ...result, orphaned: 0 };
 
   const bytes = bytesOf(await native.readFile(`${result.dir}/book.epub`));
   const { blocks } = openEpub(bytes);
-
-  const reanchored: Annotation[] = [];
-  let orphaned = 0;
-  for (const note of existing) {
-    // Search near the old position first: a book rarely repeats a sentence, but
-    // when it does, the nearest match is the intended one.
-    const order = blocks
-      .map((block, at) => ({ block, at }))
-      .sort((a, b) => Math.abs(a.at - note.block) - Math.abs(b.at - note.block));
-    const hit = order.find(({ block }) => block.text.includes(note.quote));
-    if (!hit) { orphaned++; continue; }
-    const start = hit.block.text.indexOf(note.quote);
-    reanchored.push({ ...note, block: hit.at, start, end: start + note.quote.length });
-  }
-  await native.writeText(`${result.dir}/annotations.json`, JSON.stringify(reanchored, null, 2));
+  const { kept, orphaned } = reanchorAnnotations(blocks, existing);
+  await native.writeText(`${result.dir}/annotations.json`, JSON.stringify(kept, null, 2));
   return { ...result, orphaned };
 }
 

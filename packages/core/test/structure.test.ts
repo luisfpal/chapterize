@@ -634,7 +634,7 @@ describe('images and broken markup', () => {
       'Map',
       { bookTitle: 'Notes', totalChapters: 1, frontMatter: false },
     );
-    expect(md).toContain('![River map](images/map.png)');
+    expect(md).toContain('![River map](images/OEBPS_images_map.png)');
     expect(md).toContain('before you row');
     expect(pictured!.html).not.toMatch(/<[a-z0-9]+\s+[^>]*class=/i);
     expect(pictured!.html).not.toMatch(/<(script|iframe|img|a)\b/i);

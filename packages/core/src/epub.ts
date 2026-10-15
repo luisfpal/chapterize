@@ -24,7 +24,9 @@ const NOTE_TYPES = new Set(['footnote', 'endnote', 'rearnote', 'doc-footnote', '
 const NOTE_GROUPS = new Set(['footnotes', 'endnotes', 'rearnotes', 'doc-endnotes', 'doc-footnotes']);
 
 /** A nav that must never be read as the table of contents. */
-const AUX_NAV = new Set(['page-list', 'landmarks', 'lot', 'loi', 'doc-pagelist', 'doc-landmarks']);
+const AUX_NAV = new Set([
+  'page-list', 'landmarks', 'lot', 'loi', 'loa', 'lov', 'doc-pagelist', 'doc-landmarks',
+]);
 
 const CONTENT_FILE = /\.(xhtml|html|htm|opf|ncx)(?:$|\?)/i;
 
@@ -693,7 +695,14 @@ function joinWrappedLines(blocks: Block[]): Block[] {
 
 /** The marker a note body repeats ("1." or "*") — the Markdown footnote supplies its own. */
 function stripNoteMarker(text: string): string {
-  return text.replace(/^\s*(?:[*\u2020\u2021\u00a7]+|\d{1,3}[.)]?)\s+/, '').trim();
+  // A star, or a number with its own punctuation ("1.", "12)"), is the marker
+  // the footnote repeats. So is "1 Measured", where the number introduces a
+  // capitalised sentence. A number that continues in words ("12 men remained")
+  // is the note itself, and stripping it deletes what the author wrote.
+  return text.replace(
+    /^\s*(?:[*\u2020\u2021\u00a7]+|\d{1,3}[.)]|\d{1,3}(?=\s+[A-Z]))\s+/,
+    '',
+  ).trim();
 }
 
 function isFootnote(el: Element): boolean {
@@ -776,16 +785,35 @@ function blockFrom(
   };
 }
 
-function firstImage(nodes: AnyNode[], base: string): { src?: string; alt?: string } {
-  const found = nodes.flatMap((node) => (isElement(node) ? [node, ...findAll(node, 'img'), ...findAll(node, 'image')] : []))
-    .find((el) => el.name.toLowerCase() === 'img' || el.name.toLowerCase() === 'image');
-  if (!found) return {};
-  const src = attr(found, 'src') ?? attr(found, 'href');
-  const alt = attr(found, 'alt');
-  return {
-    ...(src ? { src: resolveHref(base, src).path } : {}),
-    ...(alt ? { alt } : {}),
-  };
+/** Every figure in document order. A paragraph can hold more than one. */
+function imagesIn(nodes: AnyNode[], base: string): { src: string; alt?: string }[] {
+  const found = nodes.flatMap((node) => (
+    isElement(node) ? [node, ...findAll(node, 'img'), ...findAll(node, 'image')] : []
+  ));
+  const out: { src: string; alt?: string }[] = [];
+  const seen = new Set<Element>();
+  for (const el of found) {
+    const name = el.name.toLowerCase();
+    if ((name !== 'img' && name !== 'image') || seen.has(el)) continue;
+    seen.add(el);
+    const src = attr(el, 'src') ?? attr(el, 'href');
+    if (!src) continue;
+    const alt = attr(el, 'alt');
+    out.push({
+      src: resolveHref(base, src).path,
+      ...(alt ? { alt } : {}),
+    });
+  }
+  return out;
+}
+
+/**
+ * A paragraph inside a list item or a quotation is still that item or quote.
+ * Emitting the inner `<p>` as a paragraph dropped the list and the quote.
+ */
+function inheritedTag(tag: string, inherited: string | undefined): string {
+  if (inherited && (tag === 'p' || tag === 'div')) return inherited;
+  return tag;
 }
 
 /**
@@ -828,9 +856,19 @@ function collectBlocks(
   const isNote = (el: Element): boolean =>
     isFootnote(el) || (attr(el, 'id') !== undefined && targets.has(attr(el, 'id')!));
 
+  const emitExtras = (images: { src: string; alt?: string }[]): void => {
+    // A block carries one image. Further figures in the same paragraph used
+    // to vanish, so a page with two charts exported the first and lost the rest.
+    for (const extra of images.slice(1)) {
+      const more = blockFrom(spineIndex, path, [], 'figure', '', '', extra, []);
+      if (more) blocks.push(more);
+    }
+  };
+
   const emitElement = (el: Element, tag: string): void => {
     const text = textOf(el);
-    const image = firstImage([el], path);
+    const images = imagesIn([el], path);
+    const image: { src?: string; alt?: string } = images[0] ?? {};
     // An empty paragraph is an anchor, not a blank line. Emitting it would sit
     // between two wrapped lines and stop them being joined back into a sentence.
     if (!text && !image.src) {
@@ -848,12 +886,14 @@ function collectBlocks(
       collectNoterefs(el, path),
     );
     if (block) blocks.push(block);
+    emitExtras(images);
   };
 
-  const emitInline = (nodes: AnyNode[]): void => {
+  const emitInline = (nodes: AnyNode[], tag = 'p'): void => {
     if (!nodes.length) return;
     const text = textOf(nodes);
-    const image = firstImage(nodes, path);
+    const images = imagesIn(nodes, path);
+    const image: { src?: string; alt?: string } = images[0] ?? {};
     const ownIds = nodes.flatMap((node) => idsIn(node));
     // A run of whitespace between two paragraphs must not swallow the id of an
     // anchor that belongs to the next paragraph.
@@ -866,21 +906,24 @@ function collectBlocks(
       spineIndex,
       path,
       unique([...takePending(), ...ownIds]),
-      'p',
+      tag,
       text,
       serializeNodes(nodes),
       image,
       noterefs,
     );
     if (block) blocks.push(block);
+    emitExtras(images);
   };
 
-  const walk = (node: Element): void => {
+  const walk = (node: Element, inherited?: string): void => {
     let inline: AnyNode[] = [];
     const flush = (): void => {
       const nodes = inline;
       inline = [];
-      emitInline(nodes);
+      // A sentence written beside a child block is its own block. Inside a
+      // list or a quotation it stays one, rather than becoming a paragraph.
+      emitInline(nodes, inherited ?? 'p');
     };
     for (const child of (node.children ?? []) as AnyNode[]) {
       if (child.type === 'text') {
@@ -898,7 +941,7 @@ function collectBlocks(
       }
       if (isNoteGroup(child)) {
         flush();
-        walk(child);
+        walk(child, inherited);
         continue;
       }
       if (tag === 'img' || tag === 'image') {
@@ -908,19 +951,20 @@ function collectBlocks(
       }
       if (BLOCK_TAGS.has(tag) && !hasBlockDescendant(child)) {
         flush();
-        emitElement(child, tag);
+        emitElement(child, inheritedTag(tag, inherited));
         continue;
       }
       if (BLOCK_TAGS.has(tag) || hasBlockDescendant(child)) {
         flush();
         const id = attr(child, 'id');
         if (id) pendingIds.push(id);
-        walk(child);
+        const next = tag === 'blockquote' || tag === 'li' ? tag : inherited;
+        walk(child, next);
         continue;
       }
       // An empty <a id> is how publishers mark a chapter start. It is not a
       // paragraph, and emitting one would put the cut on a blank block.
-      if (!textOf(child) && !firstImage([child], path).src) {
+      if (!textOf(child) && imagesIn([child], path).length === 0) {
         pendingIds.push(...idsIn(child));
         continue;
       }

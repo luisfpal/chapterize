@@ -37,9 +37,26 @@ export function chapterFilename(chapter: Chapter, title: string): string {
   return `${String(chapter.index).padStart(3, '0')}-${slugify(title)}.md`;
 }
 
-/** Basename of a path inside the EPUB, used as the exported image filename. */
+/**
+ * Filename for an image exported beside the chapter.
+ *
+ * The basename alone collides, and so does collapsing every unsafe character
+ * to the same underscore: `a/b.png` and `a..b.png` both became `a_b.png`, and
+ * the second write replaced the first. Slashes become underscores, so
+ * `OEBPS/img/chart.png` stays readable. A run of dots, and any other
+ * character, is written as hex. The result has no slash and no `..`.
+ */
 export function imageFilename(path: string): string {
-  return path.split('/').pop() ?? path;
+  let out = '';
+  for (const ch of path) {
+    if (/[A-Za-z0-9]/.test(ch)) out += ch;
+    else if (ch === '/') out += '_';
+    else if (ch === '.') out += '.';
+    else out += `_${(ch.codePointAt(0) ?? 0).toString(16)}_`;
+  }
+  out = out.replace(/\.{2,}/g, (dots) => `_${'2e'.repeat(dots.length)}_`);
+  out = out.replace(/^_+|_+$/g, '');
+  return out || 'image';
 }
 
 /** `<noteref>*</noteref>` -> `[^3]`, numbered per chapter. */
@@ -51,27 +68,31 @@ function replaceNoterefs(html: string, numbers: number[]): string {
   });
 }
 
+function figureLine(block: Block): string | undefined {
+  if (!block.image) return undefined;
+  const alt = (block.alt ?? '').replace(/[[\]]/g, '');
+  return `![${alt}](images/${imageFilename(block.image)})`;
+}
+
+/** Inline emphasis, with footnote markers already numbered for this chapter. */
+function proseOf(block: Block, noteNumbers?: number[]): string {
+  const html = noteNumbers ? replaceNoterefs(block.html, noteNumbers) : block.html;
+  return html ? inlineMarkdown(html) : block.text;
+}
+
 function renderBlock(block: Block, noteNumbers?: number[]): string {
-  // A picture and its caption live in one block when the markup put them
-  // there. Rendering only the picture drops the sentence beside it.
-  const image = block.image
-    ? `![${(block.alt ?? '').replace(/[[\]]/g, '')}](images/${imageFilename(block.image)})`
-    : '';
-  let prose = '';
-  if (block.text) {
-    if (block.heading > 0) prose = `${'#'.repeat(Math.min(block.heading, 6))} ${block.text}`;
-    else if (block.tag === 'li') prose = `- ${block.text}`;
-    else if (block.tag === 'blockquote') prose = `> ${block.text}`;
-    else if (block.tag === 'pre') prose = '```\n' + block.text + '\n```';
-    else {
-      // Inline emphasis is carried through so exported prose keeps the author's
-      // stress; the tag set is a fixed whitelist, so this cannot emit anything else.
-      const html = noteNumbers ? replaceNoterefs(block.html, noteNumbers) : block.html;
-      prose = html ? inlineMarkdown(html) : block.text;
-    }
-  }
-  if (image && prose) return `${image}\n\n${prose}`;
-  return image || prose;
+  const figure = figureLine(block);
+  // An inline image used to replace the whole block, so the sentence it sat
+  // in ("see the chart before sailing") never reached the export.
+  if (figure && !block.text) return figure;
+  if (!block.text) return '';
+  let line: string;
+  if (block.heading > 0) line = `${'#'.repeat(Math.min(block.heading, 6))} ${block.text}`;
+  else if (block.tag === 'li') line = `- ${proseOf(block, noteNumbers)}`;
+  else if (block.tag === 'blockquote') line = `> ${proseOf(block, noteNumbers)}`;
+  else if (block.tag === 'pre') line = '```\n' + block.text + '\n```';
+  else line = proseOf(block, noteNumbers);
+  return figure ? `${line}\n\n${figure}` : line;
 }
 
 /**

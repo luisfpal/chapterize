@@ -5,12 +5,11 @@
  * app re-splits it on open. A reader should never be asked to re-split
  * anything — that is the parser's business leaking onto their screen.
  *
- * v4: ids inside a block resolve, same-file footnotes leave the reading flow,
- * a `<br>` is a space, books that are not UTF-8 decode from the encoding they
- * declare, and a space on each side of an inline tag collapses to one. Any of
- * those moves a block boundary or an annotation offset, so old splits are stale.
+ * v4 moved boundaries for ids, footnotes, line breaks, encodings, and inline
+ * whitespace. v5 also keeps every figure in a paragraph and the wrapper on a
+ * list item or quotation. Either one moves a block, so a v4 library is stale.
  */
-export const PARSER_VERSION = 4;
+export const PARSER_VERSION = 5;
 
 export * from './types.js';
 export { openEpub, EpubError, resolvePath } from './epub.js';
@@ -24,3 +23,10 @@ export {
   slugify, chapterFilename, imageFilename, inlineMarkdown,
   type RenderOptions,
 } from './markdown.js';
+export {
+  annotationRange, reanchorAnnotations, withHighlights,
+  type HighlightNote, type AnnotationRange,
+} from './annotations.js';
+export { search, type Hit } from './search.js';
+export { readerCommand, type ReaderCommand, type ReaderKeyState } from './reader.js';
+export { carryBookState, parseStoredJson, parseAnnotationList, tryParseBookIndex } from './library.js';

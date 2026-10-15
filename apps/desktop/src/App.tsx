@@ -3,7 +3,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { revealItemInDir } from '@tauri-apps/plugin-opener';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { listen } from '@tauri-apps/api/event';
-import { readingMinutes } from '@chapterize/core';
+import { readingMinutes, withHighlights, parseStoredJson, tryParseBookIndex } from '@chapterize/core';
 import { native, type AppDirs, type BookIndex, type LoadedBook } from './native';
 import { ingest, load } from './ingest';
 import { BookView } from './Book';
@@ -24,15 +24,25 @@ export function App() {
   const [undo, setUndo] = useState<{ trashed: string; title: string } | null>(null);
   const importing = useRef(false);
 
-  const refresh = useCallback(async (library: string) => {
+  const refresh = useCallback(async (library: string): Promise<string[]> => {
     const found = await native.listLibrary(library);
     const books: Shelf[] = [];
+    const broken: string[] = [];
     for (const dir of found) {
       const text = await native.readText(`${dir}/index.json`);
-      if (text) books.push({ dir, index: JSON.parse(text) as BookIndex });
+      if (!text) continue;
+      // One unreadable index must not hide the rest of the shelf. The file
+      // stays where it is; the message says which one and that nothing was rewritten.
+      const parsed = tryParseBookIndex(text, `${dir}/index.json`);
+      if (!parsed.ok) {
+        broken.push(parsed.error);
+        continue;
+      }
+      books.push({ dir, index: parsed.index as BookIndex });
     }
     books.sort((a, b) => a.index.title.localeCompare(b.index.title));
     setShelf(books);
+    return broken;
   }, []);
 
   useEffect(() => {
@@ -40,7 +50,8 @@ export function App() {
       try {
         const resolved = await native.appDirs();
         setDirs(resolved);
-        await refresh(resolved.library);
+        const broken = await refresh(resolved.library);
+        if (broken.length) setError(broken.join('\n'));
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       }
@@ -73,9 +84,10 @@ export function App() {
           failed.push(`${name}: ${e instanceof Error ? e.message : String(e)}`);
         }
       }
-      await refresh(dirs.library);
+      const broken = await refresh(dirs.library);
       if (done.length) setNotice(`Added ${done.join(' · ')}`);
-      if (failed.length) setError(failed.join('\n'));
+      const problems = [...failed, ...broken];
+      if (problems.length) setError(problems.join('\n'));
       if (skipped) setError((prev) => [prev, `${skipped} non-EPUB file ignored.`].filter(Boolean).join('\n'));
     } finally {
       importing.current = false;
@@ -133,11 +145,14 @@ export function App() {
       setNotice(await native.sendViaAmazon(`${dir}/book.epub`));
       const raw = await native.readText(`${dir}/index.json`);
       if (raw) {
-        const idx = JSON.parse(raw) as BookIndex;
+        const idx = parseStoredJson<BookIndex>(raw, `${dir}/index.json`);
         idx.sentToKindle = new Date().toISOString();
         await native.writeText(`${dir}/index.json`, JSON.stringify(idx, null, 2));
       }
-      if (dirs) await refresh(dirs.library);
+      if (dirs) {
+        const broken = await refresh(dirs.library);
+        if (broken.length) setError(broken.join('\n'));
+      }
       setKindleReady(true);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
@@ -169,8 +184,9 @@ export function App() {
     setMenu(null); setError('');
     try {
       const trashed = await native.removeBook(dir);
-      await refresh(dirs.library);
+      const broken = await refresh(dirs.library);
       setUndo({ trashed, title });
+      if (broken.length) setError(broken.join('\n'));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -180,8 +196,9 @@ export function App() {
     if (!undo || !dirs) return;
     try {
       await native.restoreBook(undo.trashed, dirs.library);
-      await refresh(dirs.library);
+      const broken = await refresh(dirs.library);
       setUndo(null);
+      if (broken.length) setError(broken.join('\n'));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -201,11 +218,7 @@ export function App() {
         const body = await native.readText(`${opened.dir}/chapters/${chapter.file}`);
         if (body === null) continue;
         const notes = opened.annotations.filter((a) => a.block >= chapter.start && a.block < chapter.end);
-        const suffix = notes.length
-          ? '\n\n---\n\n## My highlights\n\n' +
-            notes.map((a) => `> ${a.quote}\n${a.note ? `\n${a.note}\n` : ''}`).join('\n')
-          : '';
-        await native.writeText(`${target}/${chapter.file}`, body + suffix);
+        await native.writeText(`${target}/${chapter.file}`, withHighlights(body, notes));
         written++;
       }
       setNotice(`Exported ${written} chapter${written === 1 ? '' : 's'} to ${target}`);

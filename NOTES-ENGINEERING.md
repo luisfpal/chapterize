@@ -6,7 +6,7 @@ The 27 skipped tests were the shelf oracles in `packages/core/test/epub.test.ts`
 
 ## What changed
 
-`PARSER_VERSION` is 4. A library split with the old parser rebuilds on open, because block boundaries moved.
+`PARSER_VERSION` is 5. A library split with an older parser rebuilds on open, because block boundaries moved. Version 5 is the merge of the parser pass with the review fixes: every figure in a paragraph is kept, and a list or quotation keeps its wrapper.
 
 - EPUB 2 NCX and EPUB 3 nav. `page-list`, landmarks, and the NCX `pageList` are not chapters. A nav wins when both exist. A nav that forgot `properties="nav"` is still found. A page-list with no toc nav falls through to headings.
 - No table of contents. The shallowest heading level whose titles actually differ becomes the chapters. A repeated running header does not. The opening before the first real heading stays front matter, so the book still tiles from block 0. No headings at all means one chapter per spine file.
@@ -39,7 +39,7 @@ The shelf oracles were not executed. There are no EPUBs on this machine, and tho
 
 The desktop warning text typechecks and is not exercised in the window. This pass did not open the app.
 
-Two images with the same filename in different folders still export as one file. `imageFilename` uses the basename, and the chapter links then point at whichever write landed last.
+Two images with the same filename in different folders used to export as one file. `imageFilename` now keeps the directory in the name, and a run of dots is hex, so `a/b.png` and `a..b.png` no longer meet. The CLI bundle still prefers a readable basename and disambiguates only when two of those basenames collide.
 
 Markup so broken that the HTML parser discards the `<script>` element can still leak that text into a paragraph. A well-formed script does not.
 

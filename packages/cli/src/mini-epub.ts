@@ -1,5 +1,5 @@
 import { strToU8, zipSync } from 'fflate';
-import { imageFilename, slugify } from '@chapterize/core';
+import { slugify } from '@chapterize/core';
 import type { Book, Chapter } from '@chapterize/core';
 import { escapeHtml, renderBody } from './html.js';
 import { contentType } from './media.js';
@@ -144,7 +144,10 @@ const SAFE_IMAGE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
  * cover.png — because that is the name a person sees in the folder.
  */
 function safeImageBasename(imagePath: string): string {
-  const base = imageFilename(imagePath);
+  // The basename, not the core export name. Core keeps the directory in the
+  // name so two charts cannot overwrite each other. This pass prefers the
+  // name a person sees, and imageFileNames disambiguates when two basenames match.
+  const base = imagePath.split('/').pop() || imagePath;
   if (SAFE_IMAGE.test(base) && !base.includes('..')) return base;
   const extMatch = /\.(png|jpe?g|gif|svg|webp)$/i.exec(base);
   const ext = extMatch ? extMatch[0].toLowerCase() : '';

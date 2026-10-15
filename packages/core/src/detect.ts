@@ -99,6 +99,16 @@ function titleKey(s: string): string {
 export function detectFromHeadings(book: Book, level?: number): Detection {
   const levels = level ? [level] : [1, 2, 3];
   let best: CutPoint[] = [];
+  // A heading on every block is a running header, not a chapter, so a long
+  // book may only keep a level with at least about three blocks behind each
+  // cut. A pamphlet whose chapter is a heading plus one paragraph never
+  // reaches that ratio, and the test used to throw those headings away —
+  // the whole file became one chapter. The floor admits a handful of real
+  // headings; on a long book the one-third cap still rejects the running header.
+  const cap = Math.max(
+    Math.floor(book.blocks.length / 3),
+    Math.min(book.blocks.length, 12),
+  );
 
   for (const lvl of levels) {
     const cuts = book.blocks
@@ -109,7 +119,9 @@ export function detectFromHeadings(book: Book, level?: number): Detection {
       best = cuts;
       break;
     }
-    const cap = Math.max(2, Math.floor(book.blocks.length / 3));
+    // Shallowest diverse level wins, so a repeated running header is skipped
+    // and a book of ten chapters is not split on its forty subsections. The
+    // cap above is what lets a pamphlet keep a heading plus one paragraph.
     const distinct = new Set(cuts.map((c) => titleKey(c.title))).size;
     if (cuts.length >= 2 && cuts.length <= cap && distinct > 1) {
       best = cuts;
@@ -157,14 +169,17 @@ export function detect(book: Book, strategy?: CutPoint['source']): Detection {
   if (strategy === 'heading') return detectFromHeadings(book);
   if (strategy === 'spine') return detectFromSpine(book);
   if (strategy === 'toc' || strategy === undefined) {
-    if (book.toc.length > 1) {
-      const fromToc = detectFromToc(book);
-      if (fromToc.cuts.length > 1) return fromToc;
-    }
+    // A single TOC entry is not a table of contents. Several entries that all
+    // collapse onto one block aren't either — but the reasons they failed are
+    // still why the fallback ran, and dropping them leaves the UI saying only
+    // "found from headings" with no account of the broken links.
+    const fromToc = book.toc.length > 1 ? detectFromToc(book) : undefined;
+    if (fromToc && fromToc.cuts.length > 1) return fromToc;
     if (strategy === 'toc') return detectFromToc(book);
+    const unresolved = fromToc?.unresolved ?? [];
     const fromHeadings = detectFromHeadings(book);
-    if (fromHeadings.cuts.length > 1) return fromHeadings;
-    return detectFromSpine(book);
+    if (fromHeadings.cuts.length > 1) return { ...fromHeadings, unresolved };
+    return { ...detectFromSpine(book), unresolved };
   }
   return detectFromSpine(book);
 }
