@@ -116,6 +116,53 @@ the file is encrypted before it reaches us.
 
 ---
 
+## On a phone
+
+The application stays on the computer. Reading happens on the phone, so this
+command writes a folder of pages. Nothing is uploaded.
+
+```bash
+npm run cli -- book.epub --serve --epub
+```
+
+It prints a QR code and an address on this Wi-Fi. The phone opens that address.
+Anyone on the network can read the book until you stop the server (Ctrl-C).
+
+```bash
+npm run cli -- book.epub --icloud --epub
+```
+
+writes `iCloud Drive/Chapterize/<book>/`. On the iPhone: Files → iCloud Drive →
+Chapterize → the book → `index.html`. Safari's Share → Add to Home Screen opens
+that same page later.
+
+```bash
+npm run cli -- book.epub --out ~/Books/this-one
+```
+
+`index.html` is the contents. Each chapter is its own page, with the previous
+chapter and the next one. The pages follow the phone's light and dark appearance.
+A− and A+ change the type size, from 17px to 28px. A sideways swipe turns the
+page; a swipe that starts at the left edge is left to the browser, because that
+is how Safari goes back.
+
+The split is the same one the application uses: the EPUB navigation document,
+then headings, then file boundaries. A running head that repeats the book title
+is left off the page, because it is already the title.
+
+`--epub` writes one EPUB per chapter into `epub/`. Open one in Books when that
+chapter should live there. The file's title is the chapter and the book, so a
+shelf of them stays readable. `npx chapterize` from this repository is the same
+command.
+
+A page opened from the Files app does not share its saved place with the next
+file. The link carries the type size, the appearance, and — when you tap
+Contents — where you were. Continue is there when you come back from a chapter,
+and whenever the pages are being served. Opening `index.html` again later, cold,
+from Files, starts at the contents.
+
+---
+
 ## How chapters are found
 
 A book is flattened into one array of blocks, and **a chapter is the interval
@@ -152,6 +199,7 @@ exact.
 npm install
 npm test                      # parser suite, run against real books
 npm run typecheck
+npm run cli -- book.epub --out /tmp/this-book
 cd apps/desktop && npm run tauri dev
 ```
 

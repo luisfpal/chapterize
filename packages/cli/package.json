@@ -1,0 +1,25 @@
+{
+  "name": "@chapterize/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "chapterize": "./bin/chapterize.js"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "cli": "node --experimental-strip-types --import ./bin/register.js src/main.ts"
+  },
+  "dependencies": {
+    "@chapterize/core": "*",
+    "fflate": "^0.8.2",
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/qrcode": "^1.5.5",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
