@@ -5,6 +5,10 @@ and export them for a model. The invariant: **one chapter at a time**, because a
 whole book does not fit in a useful context window (The 48 Laws of Power is
 ~320k tokens; one law is ~4–12k).
 
+Commands, the architecture map, and the rules the toolchain enforces live in
+[AGENTS.md](./AGENTS.md). This file is the domain. If a command here and a
+command there disagree, AGENTS.md is the one that runs.
+
 ## Mandatory Instructions
 
 1. **Git Workflow**
@@ -46,7 +50,10 @@ to need one, the block model is wrong and that is the thing to fix.
 - Only append a derived name to a chapter title when the TOC label is a bare
   enumerator ("LAW 1", "IV"). Labels that already read as titles are left alone.
 - Stub chapters merge **forward** when something follows (a part divider heads the
-  chapter after it) and backward only at the end.
+  chapter after it) and backward only at the end. A chapter, book, or law number is
+  not a stub: it stays even under 200 characters. When the contents numbers 1, 2, 3
+  in order, `readingChapters` returns that run. The preface and the license are not
+  chapters. `detect` still tiles every block.
 - Markdown emphasis must not sit against a space: `**bold. **` renders literally.
 
 ## Storage rules
@@ -111,9 +118,12 @@ to need one, the block model is wrong and that is the thing to fix.
 
 ## Verification
 
-`npm test` builds original EPUBs in memory and runs the structural suite on
-those. The books vary the shapes that have failed in the wild — NCX against
-nav, page-list, fragments, a chapter split across files — because a single
-happy-path fixture cannot. Set `CHAPTERIZE_FIXTURES` to a colon-separated list
-of directories to also run the shelf oracles. No shelf path belongs in this
-repository.
+`npm test` runs every workspace suite, then `scripts/verify.mjs`. The structural
+suite builds original EPUBs in memory — NCX against nav, page-list, fragments, a
+chapter split across files — because a single happy-path fixture cannot. Set
+`CHAPTERIZE_FIXTURES` to a colon-separated list of directories to also run the
+shelf oracles. Without it those oracles are not registered, so a fresh clone
+does not report them as skipped. `verify` does not replace the shelf. No shelf
+path belongs in this repository. `packages/core/test/fixtures/pg132.epub` and
+`pg2680.epub` are the two Gutenberg books the body-chapter tests open. Pride and
+Prejudice is read from `~/chz-books/pg1342.epub` when that file is present.

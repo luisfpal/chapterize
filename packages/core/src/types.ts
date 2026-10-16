@@ -13,6 +13,12 @@
 /** Position in the flattened book. The only coordinate system we use. */
 export type BlockIndex = number;
 
+/**
+ * 0 is not a heading. 1–6 are `<h1>`–`<h6>`. A block cannot claim any other
+ * level, so a title heuristic cannot accidentally treat a paragraph as one.
+ */
+export type HeadingLevel = 0 | 1 | 2 | 3 | 4 | 5 | 6;
+
 /** One top-level element of one spine document, in reading order. */
 export interface Block {
   /** Index into `Book.spine` — which document this came from. */
@@ -28,8 +34,8 @@ export interface Block {
   ids: string[];
   /** Element tag, lowercased: "p", "h1", "blockquote"… */
   tag: string;
-  /** Heading level 1-6, or 0 when this block is not a heading. */
-  heading: number;
+  /** Heading level 1–6, or 0 when this block is not a heading. */
+  heading: HeadingLevel;
   /** Plain text content, whitespace-collapsed. Annotation offsets index into this. */
   text: string;
   /**

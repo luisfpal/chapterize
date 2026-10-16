@@ -1,0 +1,4 @@
+#!/bin/sh
+# The same gate CI runs. A commit that skips it is how a green laptop becomes a red pull request.
+cd "$(dirname "$0")/.." || exit 1
+npm run check

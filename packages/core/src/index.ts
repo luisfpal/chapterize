@@ -7,26 +7,56 @@
  *
  * v4 moved boundaries for ids, footnotes, line breaks, encodings, and inline
  * whitespace. v5 also keeps every figure in a paragraph and the wrapper on a
- * list item or quotation. Either one moves a block, so a v4 library is stale.
+ * list item or quotation. v6 reads a contents run of Chapter 1..N (or Book,
+ * or Law) as the book, and keeps a numbered chapter below the stub floor.
+ * A library split with an older parser is stale.
  */
-export const PARSER_VERSION = 5;
+export const PARSER_VERSION = 6;
 
 export * from './types.js';
 export { openEpub, EpubError, resolvePath } from './epub.js';
-export { detect, detectFromToc, detectFromHeadings, detectFromSpine, explainUnresolved } from './detect.js';
+export { must } from './must.js';
 export {
-  toChapters, splitAt, mergeUp, retitle, mergeSmall, limitCount, mergeStubs,
+  detect,
+  detectFromToc,
+  detectFromHeadings,
+  detectFromSpine,
+  explainUnresolved,
+} from './detect.js';
+export {
+  toChapters,
+  splitAt,
+  mergeUp,
+  retitle,
+  mergeSmall,
+  limitCount,
+  mergeStubs,
+  chapterIndex,
+  readingChapters,
 } from './chapters.js';
 export { deriveTitles, deriveTitle, findBoilerplate } from './titles.js';
 export {
-  renderChapter, countWords, readingMinutes,
-  slugify, chapterFilename, imageFilename, inlineMarkdown,
+  renderChapter,
+  countWords,
+  readingMinutes,
+  slugify,
+  chapterFilename,
+  imageFilename,
+  inlineMarkdown,
   type RenderOptions,
 } from './markdown.js';
 export {
-  annotationRange, reanchorAnnotations, withHighlights,
-  type HighlightNote, type AnnotationRange,
+  annotationRange,
+  reanchorAnnotations,
+  withHighlights,
+  type HighlightNote,
+  type AnnotationRange,
 } from './annotations.js';
 export { search, type Hit } from './search.js';
 export { readerCommand, type ReaderCommand, type ReaderKeyState } from './reader.js';
-export { carryBookState, parseStoredJson, parseAnnotationList, tryParseBookIndex } from './library.js';
+export {
+  carryBookState,
+  parseStoredJson,
+  parseAnnotationList,
+  tryParseBookIndex,
+} from './library.js';

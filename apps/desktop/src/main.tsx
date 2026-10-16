@@ -11,9 +11,10 @@ import './styles.css';
  * here and is written into the page.
  */
 function showFatal(what: string, detail: unknown): void {
-  const message = detail instanceof Error
-    ? `${detail.name}: ${detail.message}\n\n${detail.stack ?? ''}`
-    : String(detail);
+  const message =
+    detail instanceof Error
+      ? `${detail.name}: ${detail.message}\n\n${detail.stack ?? ''}`
+      : String(detail);
   const root = document.getElementById('root');
   if (!root) return;
   root.innerHTML = '';
@@ -30,7 +31,11 @@ window.addEventListener('error', (e) => showFatal('While running', e.error ?? e.
 window.addEventListener('unhandledrejection', (e) => showFatal('In a background task', e.reason));
 
 try {
-  createRoot(document.getElementById('root')!).render(
+  const root = document.getElementById('root');
+  if (root === null) {
+    throw new Error('index.html is missing #root, so there is nowhere to render.');
+  }
+  createRoot(root).render(
     <StrictMode>
       <App />
     </StrictMode>,

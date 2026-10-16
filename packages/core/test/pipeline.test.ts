@@ -1,13 +1,34 @@
 import { describe, expect, it } from 'vitest';
 import {
-  annotationRange, chapterFilename, countWords, deriveTitles, detect,
-  imageFilename, mergeStubs, openEpub, readingMinutes, renderChapter,
-  toChapters, withHighlights, type Book,
+  annotationRange,
+  chapterFilename,
+  countWords,
+  detect,
+  imageFilename,
+  must,
+  openEpub,
+  readingChapters,
+  readingMinutes,
+  renderChapter,
+  toChapters,
+  withHighlights,
+  type Book,
 } from '../src/index.js';
 import {
-  duplicateImageBook, enumeratorBook, epubZip, harborBook, pairedFigureBook,
-  missingFragmentBook, ncxBook, numberedNoteBook, pageListOnlyBook,
-  partDividerBook, shortHeadingBook, tocAfterPageList, wrappedNavBook,
+  duplicateImageBook,
+  enumeratorBook,
+  epubZip,
+  harborBook,
+  pairedFigureBook,
+  missingFragmentBook,
+  ncxBook,
+  numberedNoteBook,
+  pageListOnlyBook,
+  partDividerBook,
+  shortFirstChapterBook,
+  shortHeadingBook,
+  tocAfterPageList,
+  wrappedNavBook,
 } from './fixtures/build-epub.js';
 
 /**
@@ -17,11 +38,13 @@ import {
 function pipeline(bytes: Uint8Array) {
   const book = openEpub(bytes);
   const detection = detect(book);
-  const cuts = mergeStubs(detection.cuts, book.blocks, 200);
-  const chapters = deriveTitles(toChapters(cuts, book.blocks), book.blocks);
+  const chapters = readingChapters(book, detection.cuts, 200);
   const files = chapters.map((chapter) => {
     const words = countWords(
-      book.blocks.slice(chapter.start, chapter.end).map((b) => b.text).join(' '),
+      book.blocks
+        .slice(chapter.start, chapter.end)
+        .map((b) => b.text)
+        .join(' '),
     );
     return {
       file: chapterFilename(chapter, chapter.title),
@@ -38,8 +61,11 @@ function pipeline(bytes: Uint8Array) {
 }
 
 function visibleText(html: string): string {
-  return html.replace(/<[^>]+>/g, '')
-    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+  return html
+    .replace(/<[^>]+>/g, '')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>');
 }
 
 /** Annotation offsets are only meaningful when the markup's text is the block's text. */
@@ -54,7 +80,9 @@ function expectTiles(book: Book): void {
   expect(chapters[0]?.start).toBe(0);
   expect(chapters.at(-1)?.end).toBe(book.blocks.length);
   for (let i = 1; i < chapters.length; i++) {
-    expect(chapters[i]!.start).toBe(chapters[i - 1]!.end);
+    expect(must(chapters[i], 'chapters[i]').start).toBe(
+      must(chapters[i - 1], 'chapters[i - 1]').end,
+    );
   }
 }
 
@@ -71,9 +99,9 @@ describe('synthetic books through split, markdown, and highlights', () => {
     expect(detection.strategy).toBe('toc');
 
     expect(chapters.map((c) => c.title)).toEqual(['Salt', 'Iron']);
-    expect(chapters[0]!.start).toBe(0);
-    expect(chapters[1]!.start).toBeGreaterThan(0);
-    expect(chapters[1]!.end).toBe(book.blocks.length);
+    expect(must(chapters[0], 'chapters[0]').start).toBe(0);
+    expect(must(chapters[1], 'chapters[1]').start).toBeGreaterThan(0);
+    expect(must(chapters[1], 'chapters[1]').end).toBe(book.blocks.length);
     expect(files.map((f) => f.file)).toEqual(['000-salt.md', '001-iron.md']);
 
     const salt = book.blocks.find((b) => b.text.includes('rope held'));
@@ -82,7 +110,7 @@ describe('synthetic books through split, markdown, and highlights', () => {
     expect(salt?.noterefs?.[0]?.key).toBe('OEBPS/notes.xhtml#n1');
     expect(salt?.ids).toEqual([]);
 
-    const saltMd = files[0]!.markdown;
+    const saltMd = must(files[0], 'files[0]').markdown;
     expect(saltMd).toContain('fast[^1] against');
     expect(saltMd).toContain('[^1]: Measured at dawn.');
     expect(saltMd).toContain('Tom & Jerry sailed at dusk.');
@@ -91,7 +119,7 @@ describe('synthetic books through split, markdown, and highlights', () => {
     expect(saltMd).toContain('NEVER TRUST A');
     expect(saltMd).toContain('QUIET HARBOR');
 
-    const ironMd = files[1]!.markdown;
+    const ironMd = must(files[1], 'files[1]').markdown;
     expect(ironMd).toContain('> A harbor is a *promise* the sea keeps breaking.');
     expect(ironMd).toContain('- Coil the rope.');
     expect(ironMd).toContain('- Count the **oars**.');
@@ -101,10 +129,12 @@ describe('synthetic books through split, markdown, and highlights', () => {
     expect(ironMd).toContain('The loose sentence belongs in the chapter.');
     expect(book.images.get('OEBPS/img/chart.png')).toEqual(new Uint8Array([137, 80, 78, 71, 1]));
 
-    const at = salt!.text.indexOf('rope held');
-    const span = annotationRange(salt!.text, at - 1, at + 'rope held'.length + 1);
+    const at = must(salt, 'salt').text.indexOf('rope held');
+    const span = annotationRange(must(salt, 'salt').text, at - 1, at + 'rope held'.length + 1);
     expect(span).toEqual({ start: at, end: at + 'rope held'.length, quote: 'rope held' });
-    const exported = withHighlights(saltMd, [{ quote: span!.quote, note: 'Check the knot.' }]);
+    const exported = withHighlights(saltMd, [
+      { quote: must(span, 'span').quote, note: 'Check the knot.' },
+    ]);
     expect(exported).toContain('## My highlights');
     expect(exported).toContain('> rope held');
     expect(exported).toContain('Check the knot.');
@@ -128,7 +158,10 @@ describe('synthetic books through split, markdown, and highlights', () => {
   it('reads the contents nav that follows a page-list, labeled or not', () => {
     for (const kind of ['unlabeled', 'role'] as const) {
       const book = openEpub(tocAfterPageList(kind));
-      expect(book.toc.map((e) => e.label), kind).toEqual(['Salt', 'Iron']);
+      expect(
+        book.toc.map((e) => e.label),
+        kind,
+      ).toEqual(['Salt', 'Iron']);
       const titles = detect(book).cuts.map((c) => c.title);
       expect(titles, kind).toEqual(['Salt', 'Iron']);
       expect(titles, kind).not.toContain('1');
@@ -174,8 +207,8 @@ describe('synthetic books through split, markdown, and highlights', () => {
     expect(new Set(names).size).toBe(2);
     for (const name of names) expect(name).not.toMatch(/[\\/]/);
     const md = files.map((f) => f.markdown).join('\n');
-    expect(md).toContain(`images/${names[0]}`);
-    expect(md).toContain(`images/${names[1]}`);
+    expect(md).toContain(`images/${must(names[0], 'first image name')}`);
+    expect(md).toContain(`images/${must(names[1], 'second image name')}`);
     expect(md).toContain('First mark');
     expect(md).toContain('Second mark');
     expect(book.images.get('OEBPS/a/mark.png')).toEqual(new Uint8Array([1, 2, 3]));
@@ -184,10 +217,7 @@ describe('synthetic books through split, markdown, and highlights', () => {
 
   it('exports both figures when one paragraph holds two', () => {
     const { book, files } = pipeline(pairedFigureBook());
-    expect([...book.images.keys()].sort()).toEqual([
-      'OEBPS/img/depth.png',
-      'OEBPS/img/tide.png',
-    ]);
+    expect([...book.images.keys()].sort()).toEqual(['OEBPS/img/depth.png', 'OEBPS/img/tide.png']);
     const md = files.map((f) => f.markdown).join('\n');
     expect(md).toContain('before sailing.');
     expect(md).toContain('![Tide](images/OEBPS_img_tide.png)');
@@ -206,10 +236,12 @@ describe('synthetic books through split, markdown, and highlights', () => {
   it('folds a part divider into the chapter it introduces', () => {
     const { chapters, files } = pipeline(partDividerBook());
     expect(chapters).toHaveLength(1);
-    expect(chapters[0]!.title).toBe('Salt');
-    expect(chapters[0]!.start).toBe(0);
-    expect(files[0]!.markdown).toContain('Part One');
-    expect(files[0]!.markdown).toContain('The part heading belongs to this chapter');
+    expect(must(chapters[0], 'chapters[0]').title).toBe('Salt');
+    expect(must(chapters[0], 'chapters[0]').start).toBe(0);
+    expect(must(files[0], 'files[0]').markdown).toContain('Part One');
+    expect(must(files[0], 'files[0]').markdown).toContain(
+      'The part heading belongs to this chapter',
+    );
   });
 
   it('reads an EPUB 2 NCX as one chapter per file', () => {
@@ -228,10 +260,19 @@ describe('synthetic books through split, markdown, and highlights', () => {
 
   it('keeps markup text equal to block text in every synthetic book', () => {
     for (const bytes of [
-      harborBook(), pageListOnlyBook(), tocAfterPageList('unlabeled'),
-      wrappedNavBook(), missingFragmentBook(), shortHeadingBook(),
-      numberedNoteBook(), duplicateImageBook(), pairedFigureBook(), enumeratorBook(),
-      partDividerBook(), ncxBook(),
+      harborBook(),
+      pageListOnlyBook(),
+      tocAfterPageList('unlabeled'),
+      wrappedNavBook(),
+      missingFragmentBook(),
+      shortHeadingBook(),
+      numberedNoteBook(),
+      duplicateImageBook(),
+      pairedFigureBook(),
+      enumeratorBook(),
+      partDividerBook(),
+      shortFirstChapterBook(),
+      ncxBook(),
     ]) {
       const book = openEpub(bytes);
       expectTextMatchesMarkup(book);
@@ -249,10 +290,12 @@ describe('highlights appended to an exported chapter', () => {
   });
 
   it('quotes every line of a highlight that contains a line break', () => {
-    const md = withHighlights('# Salt\n\nProse.\n', [{
-      quote: 'first line\nsecond line',
-      note: 'Kept.',
-    }]);
+    const md = withHighlights('# Salt\n\nProse.\n', [
+      {
+        quote: 'first line\nsecond line',
+        note: 'Kept.',
+      },
+    ]);
     expect(md).toContain('> first line\n> second line');
     expect(md).toContain('Kept.');
     expect(md.startsWith('# Salt')).toBe(true);

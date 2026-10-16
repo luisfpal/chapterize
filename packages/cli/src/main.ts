@@ -2,11 +2,18 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { homedir, networkInterfaces, tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
-import { EpubError, openEpub } from '@chapterize/core';
+import { EpubError, must, openEpub } from '@chapterize/core';
 import { buildBundle } from './bundle.js';
 import { CliError } from './errors.js';
 import { formatLength } from './html.js';
-import { assertInside, assertSafeOut, bookFolderName, icloudBookDir, icloudRoot, lanAddress } from './paths.js';
+import {
+  assertInside,
+  assertSafeOut,
+  bookFolderName,
+  icloudBookDir,
+  icloudRoot,
+  lanAddress,
+} from './paths.js';
 import { qrArt, startServer } from './serve.js';
 import { writeBundle } from './write.js';
 
@@ -63,15 +70,26 @@ export function parseArgs(argv: string[]): { kind: 'help' } | { kind: 'run'; arg
   const positionals: string[] = [];
 
   for (let i = 0; i < argv.length; i++) {
-    const token = argv[i]!;
+    const token = must(argv[i], 'argv[i]');
     if (token === '--help' || token === '-h') return { kind: 'help' };
-    if (token === '--icloud') { icloud = true; continue; }
-    if (token === '--epub') { epubs = true; continue; }
-    if (token === '--serve') { serve = true; continue; }
+    if (token === '--icloud') {
+      icloud = true;
+      continue;
+    }
+    if (token === '--epub') {
+      epubs = true;
+      continue;
+    }
+    if (token === '--serve') {
+      serve = true;
+      continue;
+    }
     if (token === '--out') {
       const value = argv[++i];
       if (!value || value.startsWith('--')) {
-        throw new CliError('--out needs a directory. Example: chapterize book.epub --out ~/Books/this-one');
+        throw new CliError(
+          '--out needs a directory. Example: chapterize book.epub --out ~/Books/this-one',
+        );
       }
       out = value;
       continue;
@@ -85,19 +103,30 @@ export function parseArgs(argv: string[]): { kind: 'help' } | { kind: 'run'; arg
       sawPort = true;
       continue;
     }
-    if (token.startsWith('--')) throw new CliError(`Unknown option "${token}". Run chapterize --help.`);
+    if (token.startsWith('--'))
+      throw new CliError(`Unknown option "${token}". Run chapterize --help.`);
     positionals.push(token);
   }
 
   if (positionals.length === 0) throw new CliError(`No EPUB was given.\n${USAGE}`);
-  if (positionals.length > 1) throw new CliError(`Only one EPUB can be opened at a time.\n${USAGE}`);
+  if (positionals.length > 1)
+    throw new CliError(`Only one EPUB can be opened at a time.\n${USAGE}`);
   if (out !== undefined && icloud) {
-    throw new CliError('Pass --out or --icloud, not both. --icloud already chooses the folder inside iCloud Drive.');
+    throw new CliError(
+      'Pass --out or --icloud, not both. --icloud already chooses the folder inside iCloud Drive.',
+    );
   }
-  if (out === undefined && !icloud && !serve) throw new CliError(`Nowhere to put the book.\n${USAGE}`);
+  if (out === undefined && !icloud && !serve)
+    throw new CliError(`Nowhere to put the book.\n${USAGE}`);
   if (sawPort && !serve) throw new CliError('--port applies only with --serve.');
 
-  const args: Args = { epubPath: positionals[0]!, icloud, epubs, serve, port };
+  const args: Args = {
+    epubPath: must(positionals[0], 'positionals[0]'),
+    icloud,
+    epubs,
+    serve,
+    port,
+  };
   if (out !== undefined) args.out = out;
   return { kind: 'run', args };
 }
@@ -145,7 +174,8 @@ export async function run(args: Args, io: Io): Promise<Running | null> {
     assertInside(path.join(root, 'Chapterize'), dest);
   } else if (args.out !== undefined) {
     dest = path.resolve(io.cwd, args.out);
-    if (dest === epubPath) throw new CliError(`--out is the EPUB itself (${dest}). Pass a directory.`);
+    if (dest === epubPath)
+      throw new CliError(`--out is the EPUB itself (${dest}). Pass a directory.`);
     assertSafeOut(dest, io.home);
   } else {
     dest = mkdtempSync(path.join(tmpdir(), 'chapterize-'));
@@ -161,14 +191,17 @@ export async function run(args: Args, io: Io): Promise<Running | null> {
   }
 
   const total = prepared.minutes.reduce((sum, n) => sum + n, 0);
-  const count = prepared.chapters.length === 1 ? '1 chapter' : `${prepared.chapters.length} chapters`;
+  const count =
+    prepared.chapters.length === 1 ? '1 chapter' : `${prepared.chapters.length} chapters`;
   io.stdout(`${count} · ~${formatLength(total)} · ${book.metadata.title}\n`);
   io.stdout(`${dest}\n`);
   if (args.icloud) {
     io.stdout(`\nOn your iPhone: Files → iCloud Drive → Chapterize → ${folder} → index.html\n`);
     io.stdout(`Or in Safari: Share → Add to Home Screen.\n`);
   } else if (!temporary) {
-    io.stdout(`\nOpen index.html. To put it on the phone, pass --icloud or copy this folder into iCloud Drive.\n`);
+    io.stdout(
+      `\nOpen index.html. To put it on the phone, pass --icloud or copy this folder into iCloud Drive.\n`,
+    );
   }
   if (args.epubs) io.stdout(`One EPUB per chapter is in epub/. On the phone, open one in Books.\n`);
   for (const warning of prepared.warnings) io.stderr(`${warning}\n`);
@@ -182,7 +215,9 @@ export async function run(args: Args, io: Io): Promise<Running | null> {
     if (temporary) rmSync(dest, { recursive: true, force: true });
     const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
     if (code === 'EADDRINUSE') {
-      throw new CliError(`Port ${args.port} is already in use. Pass --port 0 to pick a free one, or another number.`);
+      throw new CliError(
+        `Port ${args.port} is already in use. Pass --port 0 to pick a free one, or another number.`,
+      );
     }
     throw error;
   }
@@ -201,10 +236,14 @@ export async function run(args: Args, io: Io): Promise<Running | null> {
     io.stdout(`\nOn this machine: ${localUrl}\n`);
     io.stdout(`Anyone on this network can read the book until you stop this (Ctrl-C).\n`);
   } else {
-    io.stdout(`\nNo LAN address found, so a phone on Wi-Fi cannot reach this server.\nOn this machine: ${localUrl}\n`);
+    io.stdout(
+      `\nNo LAN address found, so a phone on Wi-Fi cannot reach this server.\nOn this machine: ${localUrl}\n`,
+    );
   }
   if (temporary) {
-    io.stdout(`This copy is temporary and is deleted when the server stops. Pass --out or --icloud to keep it.\n`);
+    io.stdout(
+      `This copy is temporary and is deleted when the server stops. Pass --out or --icloud to keep it.\n`,
+    );
   }
 
   return {
@@ -254,7 +293,10 @@ async function entry(): Promise<void> {
     const stop = (): void => {
       if (stopping) return;
       stopping = true;
-      running.close().then(() => process.exit(0), () => process.exit(1));
+      running.close().then(
+        () => process.exit(0),
+        () => process.exit(1),
+      );
     };
     process.on('SIGINT', stop);
     process.on('SIGTERM', stop);
@@ -263,7 +305,7 @@ async function entry(): Promise<void> {
       io.stderr(`${error.message}\n`);
       process.exit(1);
     }
-    io.stderr(`${error instanceof Error ? error.stack ?? error.message : String(error)}\n`);
+    io.stderr(`${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`);
     process.exit(1);
   }
 }
@@ -271,4 +313,3 @@ async function entry(): Promise<void> {
 // Imported by tests as a library. Only the bin's process should serve.
 const invoked = process.argv[1] ? import.meta.url === pathToFileURL(process.argv[1]).href : false;
 if (invoked) void entry();
-

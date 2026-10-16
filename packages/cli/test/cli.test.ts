@@ -1,6 +1,15 @@
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
-import { existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -25,7 +34,18 @@ afterEach(async () => {
 });
 
 function io(home: string, cwd: string): Io & { out: string; err: string } {
-  const bucket = { out: '', err: '', home, cwd, stdout: (s: string) => { bucket.out += s; }, stderr: (s: string) => { bucket.err += s; } };
+  const bucket = {
+    out: '',
+    err: '',
+    home,
+    cwd,
+    stdout: (s: string) => {
+      bucket.out += s;
+    },
+    stderr: (s: string) => {
+      bucket.err += s;
+    },
+  };
   return bucket;
 }
 
@@ -87,7 +107,9 @@ describe('where the bundle goes', () => {
     expect(await execute([book, '--icloud'], io(home, home))).toBe(0);
     expect(existsSync(path.join(drive, 'index.html'))).toBe(false);
     expect(existsSync(path.join(drive, 'Chapterize', 'index.html'))).toBe(false);
-    expect(readFileSync(path.join(drive, 'Chapterize', 'Untitled', 'index.html'), 'utf8')).toContain('The Quiet Start');
+    expect(
+      readFileSync(path.join(drive, 'Chapterize', 'Untitled', 'index.html'), 'utf8'),
+    ).toContain('The Quiet Start');
   });
 
   it('says what to do when iCloud Drive is not there', async () => {
@@ -108,7 +130,9 @@ describe('where the bundle goes', () => {
     expect(await execute([book, '--out', out], io(home, home))).toBe(0);
     expect(() => readFileSync(path.join(out, 'chapters', 'stale.html'))).toThrow();
     expect(readFileSync(path.join(out, 'notes.txt'), 'utf8')).toBe('keep me');
-    expect(readFileSync(path.join(out, 'chapters', '001-the-quiet-start.html'), 'utf8')).toContain('UNIQUE_ALPHA');
+    expect(readFileSync(path.join(out, 'chapters', '001-the-quiet-start.html'), 'utf8')).toContain(
+      'UNIQUE_ALPHA',
+    );
   });
 
   it('refuses to replace a symlinked chapters folder', async () => {
@@ -130,7 +154,9 @@ describe('where the bundle goes', () => {
   it('names a missing file and a file that is not an EPUB', async () => {
     const home = scratch();
     const missing = io(home, home);
-    expect(await execute([path.join(home, 'nope.epub'), '--out', path.join(home, 'out')], missing)).toBe(1);
+    expect(
+      await execute([path.join(home, 'nope.epub'), '--out', path.join(home, 'out')], missing),
+    ).toBe(1);
     expect(missing.err).toMatch(/no such file/);
 
     const junk = path.join(home, 'junk.epub');
@@ -144,14 +170,52 @@ describe('where the bundle goes', () => {
 describe('LAN address and paths', () => {
   it('prefers Wi-Fi over a tunnel', () => {
     const address = lanAddress({
-      utun0: [{ address: '1.2.3.4', family: 'IPv4', internal: false, netmask: '255.0.0.0', mac: '00:00:00:00:00:00', cidr: '1.2.3.4/8' }],
-      en0: [{ address: '10.0.0.8', family: 'IPv4', internal: false, netmask: '255.255.255.0', mac: '00:00:00:00:00:00', cidr: '10.0.0.8/24' }],
-      lo0: [{ address: '127.0.0.1', family: 'IPv4', internal: true, netmask: '255.0.0.0', mac: '00:00:00:00:00:00', cidr: '127.0.0.1/8' }],
+      utun0: [
+        {
+          address: '1.2.3.4',
+          family: 'IPv4',
+          internal: false,
+          netmask: '255.0.0.0',
+          mac: '00:00:00:00:00:00',
+          cidr: '1.2.3.4/8',
+        },
+      ],
+      en0: [
+        {
+          address: '10.0.0.8',
+          family: 'IPv4',
+          internal: false,
+          netmask: '255.255.255.0',
+          mac: '00:00:00:00:00:00',
+          cidr: '10.0.0.8/24',
+        },
+      ],
+      lo0: [
+        {
+          address: '127.0.0.1',
+          family: 'IPv4',
+          internal: true,
+          netmask: '255.0.0.0',
+          mac: '00:00:00:00:00:00',
+          cidr: '127.0.0.1/8',
+        },
+      ],
     });
     expect(address).toBe('10.0.0.8');
-    expect(lanAddress({
-      lo0: [{ address: '127.0.0.1', family: 'IPv4', internal: true, netmask: '255.0.0.0', mac: '00:00:00:00:00:00', cidr: '127.0.0.1/8' }],
-    })).toBeNull();
+    expect(
+      lanAddress({
+        lo0: [
+          {
+            address: '127.0.0.1',
+            family: 'IPv4',
+            internal: true,
+            netmask: '255.0.0.0',
+            mac: '00:00:00:00:00:00',
+            cidr: '127.0.0.1/8',
+          },
+        ],
+      }),
+    ).toBeNull();
   });
 
   it('does not let a URL walk out of the bundle', () => {
@@ -177,7 +241,10 @@ describe('the server', () => {
     const book = epubFile(home);
     const out = path.join(home, 'bundle');
     const logs = io(home, home);
-    const running = await run({ epubPath: book, out, icloud: false, epubs: true, serve: true, port: 0 }, logs);
+    const running = await run(
+      { epubPath: book, out, icloud: false, epubs: true, serve: true, port: 0 },
+      logs,
+    );
     if (!running) throw new Error('server did not start');
     closers.push(running.close);
 
@@ -190,7 +257,7 @@ describe('the server', () => {
       expect(logs.out).toContain('No LAN address');
     }
 
-    const index = await fetch(`${running.localUrl}`);
+    const index = await fetch(running.localUrl);
     expect(index.status).toBe(200);
     expect(index.headers.get('content-type')).toContain('text/html');
     expect(await index.text()).toContain('The Quiet Start');
@@ -207,7 +274,9 @@ describe('the server', () => {
     expect(bytes[0]).toBe(0x50);
     expect(bytes[1]).toBe(0x4b);
 
-    const escaped = await fetch(`${running.localUrl}chapters/${encodeURIComponent('../'.repeat(4) + 'etc/passwd')}`);
+    const escaped = await fetch(
+      `${running.localUrl}chapters/${encodeURIComponent('../'.repeat(4) + 'etc/passwd')}`,
+    );
     expect(escaped.status).toBe(404);
 
     const walked = await fetch(`${running.localUrl}chapters/..%2F..%2F..%2Fetc/passwd`);
@@ -227,7 +296,10 @@ describe('the server', () => {
     const icon = await fetch(`${running.localUrl}favicon.ico`);
     expect(icon.status).toBe(204);
 
-    writeFileSync(path.join(out, 'evil.svg'), '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>');
+    writeFileSync(
+      path.join(out, 'evil.svg'),
+      '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>',
+    );
     const svg = await fetch(`${running.localUrl}evil.svg`);
     expect(svg.status).toBe(200);
     expect(svg.headers.get('content-security-policy')).toContain("script-src 'none'");
@@ -241,14 +313,19 @@ describe('the server', () => {
     await new Promise<void>((resolve) => blocker.listen(0, '0.0.0.0', () => resolve()));
     const address = blocker.address();
     const port = address && typeof address === 'object' ? address.port : 0;
-    const owned = (name: string) => name.startsWith('chapterize-') && !name.startsWith('chapterize-test-');
+    const owned = (name: string) =>
+      name.startsWith('chapterize-') && !name.startsWith('chapterize-test-');
     const before = new Set(readdirSync(tmpdir()).filter(owned));
     const logs = io(home, home);
     expect(await execute([book, '--serve', '--port', String(port)], logs)).toBe(1);
     expect(logs.err).toMatch(/already in use/);
-    const leaked = readdirSync(tmpdir()).filter(owned).filter((name) => !before.has(name));
+    const leaked = readdirSync(tmpdir())
+      .filter(owned)
+      .filter((name) => !before.has(name));
     expect(leaked).toEqual([]);
-    await new Promise<void>((resolve, reject) => blocker.close((error) => (error ? reject(error) : resolve())));
+    await new Promise<void>((resolve, reject) =>
+      blocker.close((error) => (error ? reject(error) : resolve())),
+    );
   });
 });
 
@@ -262,8 +339,12 @@ describe('the bin', () => {
       let err = '';
       child.stdout.setEncoding('utf8');
       child.stderr.setEncoding('utf8');
-      child.stdout.on('data', (chunk) => { out += chunk; });
-      child.stderr.on('data', (chunk) => { err += chunk; });
+      child.stdout.on('data', (chunk: unknown) => {
+        out += String(chunk);
+      });
+      child.stderr.on('data', (chunk: unknown) => {
+        err += String(chunk);
+      });
       child.on('error', reject);
       child.on('exit', (code) => resolve({ code: code ?? 1, out, err }));
     });

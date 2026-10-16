@@ -2,10 +2,30 @@
   "name": "chapterize",
   "private": true,
   "type": "module",
-  "workspaces": ["packages/*", "apps/*"],
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=22.15"
+  },
   "scripts": {
-    "test": "npm run test --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present && npm run verify",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "cli": "npm run cli --workspace @chapterize/cli --"
+    "cli": "npm run cli --workspace @chapterize/cli --",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "verify": "node --import ./scripts/register-ts.mjs scripts/verify.mjs",
+    "check": "npm run format:check && npm run lint && npm run typecheck && npm test",
+    "prepare": "node scripts/install-hooks.mjs"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.12.0",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.9.10",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.71.2"
   }
 }

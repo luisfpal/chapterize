@@ -6,7 +6,9 @@ export type { Hit };
 export { search };
 
 export function SearchPanel({
-  blocks, chapters, onGo,
+  blocks,
+  chapters,
+  onGo,
 }: {
   blocks: Block[];
   chapters: { start: number; end: number; title: string }[];
@@ -20,21 +22,23 @@ export function SearchPanel({
     return () => window.clearTimeout(t);
   }, [query]);
 
-  const hits = useMemo(
-    () => search(blocks, chapters, debounced),
-    [blocks, chapters, debounced],
-  );
+  const hits = useMemo(() => search(blocks, chapters, debounced), [blocks, chapters, debounced]);
 
   return (
     <>
       <div className="field">
         <input
-          type="text" autoFocus placeholder="Find in this book…"
-          value={query} onChange={(e) => setQuery(e.target.value)}
+          type="text"
+          autoFocus
+          placeholder="Find in this book…"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
         />
         {debounced.length >= 2 && (
-          <p className="hint">{hits.length === 200 ? '200+' : hits.length} match
-            {hits.length === 1 ? '' : 'es'}</p>
+          <p className="hint">
+            {hits.length === 200 ? '200+' : hits.length} match
+            {hits.length === 1 ? '' : 'es'}
+          </p>
         )}
       </div>
       {hits.map((h, i) => (
@@ -64,36 +68,49 @@ export function useSpeech() {
   const [speaking, setSpeaking] = useState(false);
   const [available, setAvailable] = useState(false);
 
-  useEffect(() => { void native.speechAvailable().then(setAvailable); }, []);
+  useEffect(() => {
+    void native.speechAvailable().then(setAvailable);
+  }, []);
 
   const stop = useCallback(async () => {
     await native.stopSpeaking();
     setSpeaking(false);
   }, []);
 
-  const start = useCallback(async (text: string): Promise<string | null> => {
-    if (!available) return 'Reading aloud is unavailable on this system.';
-    if (!text.trim()) return null;
-    setSpeaking(true);
-    try {
-      await native.speak(text);
-      return null;
-    } catch (cause) {
-      setSpeaking(false);
-      const detail = cause instanceof Error ? cause.message : String(cause);
-      return `Could not read this chapter aloud: ${detail}`;
-    }
-  }, [available]);
+  const start = useCallback(
+    async (text: string): Promise<string | null> => {
+      if (!available) return 'Reading aloud is unavailable on this system.';
+      if (!text.trim()) return null;
+      setSpeaking(true);
+      try {
+        await native.speak(text);
+        return null;
+      } catch (cause) {
+        setSpeaking(false);
+        const detail = cause instanceof Error ? cause.message : String(cause);
+        return `Could not read this chapter aloud: ${detail}`;
+      }
+    },
+    [available],
+  );
 
   // Speech outlives the window unless it is cancelled on the way out.
-  useEffect(() => () => { void native.stopSpeaking(); }, []);
+  useEffect(
+    () => () => {
+      void native.stopSpeaking();
+    },
+    [],
+  );
 
   return { speaking, available, start, stop };
 }
 
 /* ── dictionary ─────────────────────────────────────────────────────── */
 
-export interface Definition { partOfSpeech: string; sense: string }
+export interface Definition {
+  partOfSpeech: string;
+  sense: string;
+}
 
 /**
  * Look a word up on Wiktionary.
@@ -103,16 +120,31 @@ export interface Definition { partOfSpeech: string; sense: string }
  * language-learning material, which is what earns it the exception.
  */
 export async function define(word: string, lang = 'en'): Promise<Definition[]> {
-  const clean = word.trim().toLowerCase().replace(/[^\p{L}\p{M}'-]/gu, '');
+  const clean = word
+    .trim()
+    .toLowerCase()
+    .replace(/[^\p{L}\p{M}'-]/gu, '');
   if (!clean) return [];
   const url = `https://${lang}.wiktionary.org/api/rest_v1/page/definition/${encodeURIComponent(clean)}`;
   const res = await fetch(url, { headers: { accept: 'application/json' } });
-  if (!res.ok) throw new Error(res.status === 404 ? `No entry for “${clean}”.` : `Lookup failed (${res.status}).`);
-  const data = (await res.json()) as Record<string, { partOfSpeech?: string; definitions?: { definition?: string }[] }[]>;
-  const strip = (html: string) => html.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
-  return (data[lang] ?? []).flatMap((entry) =>
-    (entry.definitions ?? [])
-      .map((d) => ({ partOfSpeech: entry.partOfSpeech ?? '', sense: strip(d.definition ?? '') }))
-      .filter((d) => d.sense),
-  ).slice(0, 6);
+  if (!res.ok)
+    throw new Error(
+      res.status === 404 ? `No entry for “${clean}”.` : `Lookup failed (${res.status}).`,
+    );
+  const data = (await res.json()) as Record<
+    string,
+    { partOfSpeech?: string; definitions?: { definition?: string }[] }[]
+  >;
+  const strip = (html: string) =>
+    html
+      .replace(/<[^>]+>/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  return (data[lang] ?? [])
+    .flatMap((entry) =>
+      (entry.definitions ?? [])
+        .map((d) => ({ partOfSpeech: entry.partOfSpeech ?? '', sense: strip(d.definition ?? '') }))
+        .filter((d) => d.sense),
+    )
+    .slice(0, 6);
 }

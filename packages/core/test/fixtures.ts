@@ -9,9 +9,7 @@ import { join } from 'node:path';
  * too. A maintainer's reading list is not something the repository should carry,
  * so without the variable those oracles are simply not registered.
  */
-const ROOTS = (process.env['CHAPTERIZE_FIXTURES'] ?? '')
-  .split(':')
-  .filter(Boolean);
+const ROOTS = (process.env['CHAPTERIZE_FIXTURES'] ?? '').split(':').filter(Boolean);
 
 /** Scratch copies made during calibration would otherwise be counted twice. */
 const EXCLUDE = /_chapterize_experiment/;
@@ -34,7 +32,10 @@ export function allBooks(): string[] {
     for (const path of walk(root)) {
       // The library holds a copy of each imported book; count each title once.
       const key = path.split('/').pop() ?? path;
-      if (key === 'book.epub') { out.push(path); continue; }
+      if (key === 'book.epub') {
+        out.push(path);
+        continue;
+      }
       if (seen.has(key)) continue;
       seen.add(key);
       out.push(path);

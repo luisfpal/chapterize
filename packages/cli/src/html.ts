@@ -1,3 +1,4 @@
+import { must } from '@chapterize/core';
 import type { Block, NoteRef } from '@chapterize/core';
 
 /**
@@ -10,7 +11,20 @@ export const SIZES = [17, 19, 21, 24, 28] as const;
 /** How far into a chapter a repeated running head is allowed to hide. Matches titles.ts. */
 const TITLE_WINDOW = 12;
 
-const ALLOWED = new Set(['em', 'i', 'strong', 'b', 'sup', 'sub', 'code', 'cite', 'q', 'small', 'u', 'noteref']);
+const ALLOWED = new Set([
+  'em',
+  'i',
+  'strong',
+  'b',
+  'sup',
+  'sub',
+  'code',
+  'cite',
+  'q',
+  'small',
+  'u',
+  'noteref',
+]);
 
 export function escapeHtml(s: string): string {
   return clean(s)
@@ -22,7 +36,13 @@ export function escapeHtml(s: string): string {
 
 /** XML rejects these controls, and they never mean anything in prose. */
 function clean(s: string): string {
-  return s.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '');
+  let out = '';
+  for (const ch of s) {
+    const c = ch.codePointAt(0) ?? 0;
+    if (c <= 0x08 || c === 0x0b || c === 0x0c || (c >= 0x0e && c <= 0x1f)) continue;
+    out += ch;
+  }
+  return out;
 }
 
 /** Same folding as the boilerplate finder, which does not export its normaliser. */
@@ -45,7 +65,7 @@ function unsafeInline(html: string): boolean {
   const re = /<\/?([a-z0-9]+)(\s[^>]*)?>/gi;
   let match: RegExpExecArray | null;
   while ((match = re.exec(html))) {
-    const name = match[1]!.toLowerCase();
+    const name = must(match[1], 'match[1]').toLowerCase();
     if (!ALLOWED.has(name)) return true;
     if (match[2]?.trim()) return true;
   }
@@ -67,7 +87,13 @@ export interface BodyInput {
   boilerplate: Set<string>;
 }
 
-function marker(block: Block, index: number, bookNotes: Map<string, string>, items: NoteItem[], next: () => number): string {
+function marker(
+  block: Block,
+  index: number,
+  bookNotes: Map<string, string>,
+  items: NoteItem[],
+  next: () => number,
+): string {
   const ref: NoteRef | undefined = block.noterefs?.[index];
   const n = next();
   const text = ref
@@ -77,19 +103,33 @@ function marker(block: Block, index: number, bookNotes: Map<string, string>, ite
   return `<sup class="fn" id="fnref-${n}"><a href="#fn-${n}">${n}</a></sup>`;
 }
 
-function inline(block: Block, bookNotes: Map<string, string>, items: NoteItem[], next: () => number): string {
+function inline(
+  block: Block,
+  bookNotes: Map<string, string>,
+  items: NoteItem[],
+  next: () => number,
+): string {
   const raw = block.html;
   const trusted = raw.length > 0 && !unsafeInline(raw);
   let html = trusted ? clean(raw) : escapeHtml(block.text);
   let seen = 0;
-  html = html.replace(/<noteref>[\s\S]*?<\/noteref>/g, () => marker(block, seen++, bookNotes, items, next));
+  html = html.replace(/<noteref>[\s\S]*?<\/noteref>/g, () =>
+    marker(block, seen++, bookNotes, items, next),
+  );
   if (seen === 0 && block.noterefs?.length) {
-    for (let i = 0; i < block.noterefs.length; i++) html += marker(block, i, bookNotes, items, next);
+    for (let i = 0; i < block.noterefs.length; i++)
+      html += marker(block, i, bookNotes, items, next);
   }
   return html;
 }
 
-function isRunningHead(block: Block, offset: number, chapterTitle: string, bookTitle: string, boilerplate: Set<string>): boolean {
+function isRunningHead(
+  block: Block,
+  offset: number,
+  chapterTitle: string,
+  bookTitle: string,
+  boilerplate: Set<string>,
+): boolean {
   if (block.heading === 0 || offset > TITLE_WINDOW) return false;
   const key = normalise(block.text);
   if (!key) return false;
@@ -98,8 +138,9 @@ function isRunningHead(block: Block, offset: number, chapterTitle: string, bookT
 
 function notesSection(items: NoteItem[]): string {
   if (!items.length) return '';
-  const lis = items.map((item) =>
-    `<li id="fn-${item.n}">${escapeHtml(item.text)} <a href="#fnref-${item.n}" aria-label="Back to the reference">↩</a></li>`,
+  const lis = items.map(
+    (item) =>
+      `<li id="fn-${item.n}">${escapeHtml(item.text)} <a href="#fnref-${item.n}" aria-label="Back to the reference">↩</a></li>`,
   );
   return `<section class="notes">\n<h2>Notes</h2>\n<ol>\n${lis.join('\n')}\n</ol>\n</section>`;
 }
@@ -113,15 +154,15 @@ export function renderBody(input: BodyInput): { body: string; notesHtml: string 
   let i = 0;
   const blocks = input.blocks;
   while (i < blocks.length) {
-    const block = blocks[i]!;
+    const block = must(blocks[i], 'blocks[i]');
     if (isRunningHead(block, i, input.chapterTitle, input.bookTitle, input.boilerplate)) {
       i++;
       continue;
     }
     if (block.tag === 'li') {
       const lis: string[] = [];
-      while (i < blocks.length && blocks[i]!.tag === 'li') {
-        const item = blocks[i]!;
+      while (i < blocks.length && must(blocks[i], 'blocks[i]').tag === 'li') {
+        const item = must(blocks[i], 'blocks[i]');
         lis.push(`<li>${inline(item, input.notes, items, next)}</li>`);
         i++;
       }
@@ -139,8 +180,11 @@ function oneBlock(block: Block, input: BodyInput, items: NoteItem[], next: () =>
     const src = input.imageSrc(block.image);
     if (src) {
       const alt = escapeHtml(block.alt ?? '');
-      const showCaption = block.text.trim() !== '' && block.text.trim() !== (block.alt ?? '').trim();
-      const caption = showCaption ? `<figcaption>${inline(block, input.notes, items, next)}</figcaption>` : '';
+      const showCaption =
+        block.text.trim() !== '' && block.text.trim() !== (block.alt ?? '').trim();
+      const caption = showCaption
+        ? `<figcaption>${inline(block, input.notes, items, next)}</figcaption>`
+        : '';
       return `<figure><img src="${escapeHtml(src)}" alt="${alt}"/>${caption}</figure>`;
     }
   }
@@ -209,7 +253,9 @@ function shell(opts: {
     opts.file ? `data-file="${escapeHtml(opts.file)}"` : '',
     opts.prev ? `data-prev="${escapeHtml(opts.prev)}"` : 'data-prev=""',
     opts.next ? `data-next="${escapeHtml(opts.next)}"` : 'data-next=""',
-  ].filter(Boolean).join(' ');
+  ]
+    .filter(Boolean)
+    .join(' ');
   return `<!DOCTYPE html>
 <html lang="${escapeHtml(opts.lang)}">
 <head>
@@ -256,9 +302,12 @@ export function renderIndex(opts: {
 }): string {
   const count = opts.rows.length === 1 ? '1 chapter' : `${opts.rows.length} chapters`;
   const byline = opts.author ? `<p class="byline">${escapeHtml(opts.author)}</p>` : '';
-  const rows = opts.rows.map((row) =>
-    `<a class="row" href="${escapeHtml(row.href)}" style="--depth: ${Math.max(0, Math.min(12, row.depth | 0))}"><span class="num">${row.n}</span><span class="name">${escapeHtml(row.title)}</span><span class="time">${formatLength(row.minutes)}</span></a>`,
-  ).join('\n');
+  const rows = opts.rows
+    .map(
+      (row) =>
+        `<a class="row" href="${escapeHtml(row.href)}" style="--depth: ${Math.max(0, Math.min(12, row.depth | 0))}"><span class="num">${row.n}</span><span class="name">${escapeHtml(row.title)}</span><span class="time">${formatLength(row.minutes)}</span></a>`,
+    )
+    .join('\n');
   const body = `<header class="top"><span class="booklink">Contents</span>${TOOLS}</header>
 <main class="column" id="text">
 <h1>${escapeHtml(opts.bookTitle)}</h1>
@@ -298,18 +347,20 @@ export function renderChapterPage(opts: {
   notesHtml: string;
 }): string {
   const place = `Chapter ${opts.index + 1} of ${opts.total}`;
-  const length = opts.index + 1 < opts.total
-    ? `${place} · ${formatLength(opts.leftMinutes)} left in the book`
-    : `${place} · ${formatLength(opts.minutes)}`;
+  const length =
+    opts.index + 1 < opts.total
+      ? `${place} · ${formatLength(opts.leftMinutes)} left in the book`
+      : `${place} · ${formatLength(opts.minutes)}`;
   const prev = opts.prevHref
     ? `<a href="${escapeHtml(opts.prevHref)}">Prev</a>`
     : `<span class="off">Prev</span>`;
   const next = opts.nextHref
     ? `<a href="${escapeHtml(opts.nextHref)}">Next</a>`
     : `<span class="off">Next</span>`;
-  const turn = opts.nextHref && opts.nextTitle
-    ? `<a class="next-chapter" href="${escapeHtml(opts.nextHref)}"><span class="turn-kicker">Next</span><span class="turn-title">${escapeHtml(opts.nextTitle)}</span></a>`
-    : `<p class="end-mark">End of the book</p>`;
+  const turn =
+    opts.nextHref && opts.nextTitle
+      ? `<a class="next-chapter" href="${escapeHtml(opts.nextHref)}"><span class="turn-kicker">Next</span><span class="turn-title">${escapeHtml(opts.nextTitle)}</span></a>`
+      : `<p class="end-mark">End of the book</p>`;
   const books = opts.epubHref
     ? `<p class="books"><a href="${escapeHtml(opts.epubHref)}">Open this chapter in Books</a></p>`
     : '';

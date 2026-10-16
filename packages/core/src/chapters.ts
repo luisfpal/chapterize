@@ -1,11 +1,185 @@
-import type { Block, BlockIndex, Chapter, CutPoint } from './types.js';
+import type { Block, BlockIndex, Book, Chapter, CutPoint } from './types.js';
+import { must } from './must.js';
+import { deriveTitles } from './titles.js';
+
+/** A contents label that names chapter, book, or law N. Part numbers are not chapters. */
+export type ChapterScheme = 'chapter' | 'book' | 'law';
+
+const ORDINALS = [
+  'first',
+  'second',
+  'third',
+  'fourth',
+  'fifth',
+  'sixth',
+  'seventh',
+  'eighth',
+  'ninth',
+  'tenth',
+  'eleventh',
+  'twelfth',
+] as const;
+
+const ROMAN: readonly (readonly [string, number])[] = [
+  ['m', 1000],
+  ['cm', 900],
+  ['d', 500],
+  ['cd', 400],
+  ['c', 100],
+  ['xc', 90],
+  ['l', 50],
+  ['xl', 40],
+  ['x', 10],
+  ['ix', 9],
+  ['v', 5],
+  ['iv', 4],
+  ['i', 1],
+];
+
+function toRoman(value: number): string {
+  let rest = value;
+  let out = '';
+  for (const [symbol, amount] of ROMAN) {
+    while (rest >= amount) {
+      out += symbol;
+      rest -= amount;
+    }
+  }
+  return out;
+}
+
+/** Canonical roman only. "mix" and "iiii" are letters, not numbers. */
+function romanValue(token: string): number | null {
+  const text = token.toLowerCase();
+  let at = 0;
+  let value = 0;
+  while (at < text.length) {
+    const pair = ROMAN.find(([symbol]) => text.startsWith(symbol, at));
+    if (pair === undefined) return null;
+    value += pair[1];
+    at += pair[0].length;
+  }
+  return toRoman(value) === text ? value : null;
+}
+
+function schemeOf(word: string): ChapterScheme | null {
+  const lower = word.toLowerCase();
+  if (lower === 'chapter' || lower === 'book' || lower === 'law') return lower;
+  return null;
+}
+
+/**
+ * The chapter, book, or law number written in a contents label.
+ *
+ * The word may sit anywhere: a caption often precedes it ("… CHAPTER II."),
+ * and the number may be glued on ("CHAPTERXXVII"). "THE FIRST BOOK" is 1.
+ * "Part One" and the heading "BOOKS" are not numbers.
+ * When a label names two, the later one is the chapter. The caption comes first.
+ */
+export function chapterIndex(label: string): { scheme: ChapterScheme; n: number } | null {
+  const text = label.normalize('NFKC');
+  const numbered = /(?<![a-z0-9])(chapter|book|law)\s*(\d+|[ivxlcdm]+)(?![a-z0-9])/gi;
+  let chosen: { scheme: ChapterScheme; n: number } | null = null;
+  for (const match of text.matchAll(numbered)) {
+    const word = match[1];
+    const raw = match[2];
+    if (word === undefined || raw === undefined) continue;
+    const scheme = schemeOf(word);
+    if (scheme === null) continue;
+    const n = /^\d+$/.test(raw) ? Number(raw) : romanValue(raw);
+    if (n === null || n < 1) continue;
+    chosen = { scheme, n };
+  }
+  if (chosen !== null) return chosen;
+
+  const schemeMatch = /(?<![a-z0-9])(chapter|book|law)(?![a-z0-9])/i.exec(text);
+  const word = schemeMatch?.[1];
+  if (word === undefined) return null;
+  const scheme = schemeOf(word);
+  if (scheme === null) return null;
+  for (let i = 0; i < ORDINALS.length; i++) {
+    const ordinal = ORDINALS[i];
+    if (ordinal === undefined) continue;
+    if (new RegExp(`(?<![a-z0-9])${ordinal}(?![a-z0-9])`, 'i').test(text)) {
+      return { scheme, n: i + 1 };
+    }
+  }
+  return null;
+}
+
+/**
+ * Longest contents run whose numbers are 1, 2, 3, … in reading order.
+ *
+ * An unnumbered entry between them is not a break. A second "1" is: the run
+ * starts again there, so a half-title "HIS FIRST BOOK" does not eat "THE FIRST BOOK".
+ * One numbered entry is not a run. A book with no run keeps every cut.
+ */
+function bodyRun(cuts: CutPoint[]): CutPoint[] | null {
+  let best: CutPoint[] | null = null;
+  for (const scheme of ['chapter', 'book', 'law'] as const) {
+    const numbered: { cut: CutPoint; n: number }[] = [];
+    for (const cut of cuts) {
+      const index = chapterIndex(cut.title);
+      if (index !== null && index.scheme === scheme) numbered.push({ cut, n: index.n });
+    }
+    let i = 0;
+    while (i < numbered.length) {
+      const start = numbered[i];
+      if (start === undefined || start.n !== 1) {
+        i++;
+        continue;
+      }
+      const run: CutPoint[] = [start.cut];
+      let expect = 2;
+      let j = i + 1;
+      while (j < numbered.length) {
+        const next = numbered[j];
+        if (next === undefined || next.n !== expect) break;
+        run.push(next.cut);
+        expect++;
+        j++;
+      }
+      if (run.length >= 2 && (best === null || run.length > best.length)) best = run;
+      i = Math.max(j, i + 1);
+    }
+  }
+  return best;
+}
+
+function endOfRun(cuts: CutPoint[], run: CutPoint[], blockCount: number): number {
+  const last = run[run.length - 1];
+  if (last === undefined) return blockCount;
+  let tail = blockCount;
+  for (const cut of cuts) {
+    if (cut.at > last.at && cut.at < tail) tail = cut.at;
+  }
+  return tail;
+}
+
+/**
+ * The chapters a reader opens.
+ *
+ * `detect` still tiles every block, so a preface and a license remain cuts.
+ * A run of Chapter 1..N (or Book, or Law) is the book: the preface is not a
+ * chapter, and the license does not extend the last one. Without such a run
+ * the old split stands, including a part divider folded into what it introduces.
+ */
+export function readingChapters(book: Book, cuts: CutPoint[], minChars: number): Chapter[] {
+  const ordered = [...cuts].sort((a, b) => a.at - b.at);
+  const run = bodyRun(ordered);
+  const selected = run ?? ordered;
+  const limit = run === null ? book.blocks.length : endOfRun(ordered, run, book.blocks.length);
+  const blocks = limit === book.blocks.length ? book.blocks : book.blocks.slice(0, limit);
+  return deriveTitles(toChapters(mergeStubs(selected, blocks, minChars), blocks), blocks);
+}
 
 /** Cut points become chapters: chapter i spans [cuts[i].at, cuts[i+1].at). */
 export function toChapters(cuts: CutPoint[], blocks: Block[]): Chapter[] {
   return cuts.map((cut, i) => {
-    const end = i + 1 < cuts.length ? cuts[i + 1]!.at : blocks.length;
+    const next = cuts[i + 1];
+    const end = next !== undefined ? next.at : blocks.length;
     let chars = 0;
-    for (let b = cut.at; b < end; b++) chars += blocks[b]!.text.length;
+    for (let b = cut.at; b < end; b++) chars += must(blocks[b], `block ${b}`).text.length;
     return {
       index: i,
       title: cut.title,
@@ -72,15 +246,20 @@ export function mergeStubs(cuts: CutPoint[], blocks: Block[], minChars: number):
   // Each pass removes at most one boundary, so the loop is bounded by the count.
   for (let guard = 0; guard < cuts.length; guard++) {
     const chapters = toChapters(current, blocks);
-    const victim = chapters.findIndex((c) => c.chars < minChars);
+    // A numbered chapter is the book, however short. Folding it forward is
+    // what dropped Chapter I and left the reader on the next chapter.
+    const victim = chapters.findIndex(
+      (chapter) => chapter.chars < minChars && chapterIndex(chapter.title) === null,
+    );
     if (victim === -1 || chapters.length < 2) break;
 
     if (victim < current.length - 1) {
       // Forward: keep this start, adopt the following chapter's title.
-      const next = current[victim + 1]!;
+      const next = must(current[victim + 1], `cut ${victim + 1}`);
+      const here = must(current[victim], `cut ${victim}`);
       current = [
         ...current.slice(0, victim),
-        { ...next, at: current[victim]!.at },
+        { ...next, at: here.at },
         ...current.slice(victim + 2),
       ];
     } else {
@@ -101,7 +280,9 @@ export function limitCount(cuts: CutPoint[], blocks: Block[], max: number): CutP
     const chapters = toChapters(current, blocks);
     let victim = 1;
     for (let i = 1; i < chapters.length; i++) {
-      if (chapters[i]!.chars < chapters[victim]!.chars) victim = i;
+      const chapter = must(chapters[i], `chapter ${i}`);
+      const smallest = must(chapters[victim], `chapter ${victim}`);
+      if (chapter.chars < smallest.chars) victim = i;
     }
     current = mergeUp(current, victim);
   }

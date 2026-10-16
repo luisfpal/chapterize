@@ -27,8 +27,9 @@ because that is Safari's back gesture.
 
 Footnotes, figures, lists, and quotes come through. A running head that
 repeats the book title is left off. The chapter cuts are the desktop app's
-cuts: the navigation document, then headings, then files, and a stub under
-200 characters merges into the next chapter.
+cuts: the navigation document, then headings, then files. A numbered run
+(chapter, book, or law, 1 then 2 then 3) is the book. An unnumbered stub
+under 200 characters still merges into the next chapter.
 
 `--epub` adds `epub/001-title.epub`, an EPUB 3 file whose mimetype is stored
 and first, so Books will open it. The identifier is stable, so importing the

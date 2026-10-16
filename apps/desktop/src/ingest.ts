@@ -1,13 +1,29 @@
 import {
-  openEpub, detect, toChapters, deriveTitles, renderChapter, chapterFilename,
-  mergeStubs, imageFilename, countWords, readingMinutes, PARSER_VERSION, EpubError,
+  openEpub,
+  detect,
+  renderChapter,
+  chapterFilename,
+  readingChapters,
+  toChapters,
+  imageFilename,
+  countWords,
+  readingMinutes,
+  PARSER_VERSION,
+  EpubError,
   explainUnresolved,
-  reanchorAnnotations, carryBookState, parseAnnotationList, tryParseBookIndex,
+  reanchorAnnotations,
+  carryBookState,
 } from '@chapterize/core';
 import type { CutPoint } from '@chapterize/core';
 import {
-  native, bookFolderName, bytesOf,
-  type Annotation, type BookIndex, type LoadedBook, type OutputFile,
+  native,
+  bookFolderName,
+  bytesOf,
+  parseAnnotations,
+  parseBookIndex,
+  type BookIndex,
+  type LoadedBook,
+  type OutputFile,
 } from './native';
 
 /** A cover or half-title below this many characters is not a chapter. */
@@ -41,12 +57,13 @@ export async function ingest(
   try {
     book = openEpub(bytes);
   } catch (error) {
-    throw error instanceof EpubError ? error : new Error(`Could not read the EPUB: ${String(error)}`);
+    throw error instanceof EpubError
+      ? error
+      : new Error(`Could not read the EPUB: ${String(error)}`);
   }
 
   const detection = detect(book);
-  const cuts = mergeStubs(detection.cuts, book.blocks, STUB_CHARS);
-  const chapters = deriveTitles(toChapters(cuts, book.blocks), book.blocks);
+  const chapters = readingChapters(book, detection.cuts, STUB_CHARS);
 
   const warnings: string[] = [];
   if (detection.unresolved.length) {
@@ -72,7 +89,8 @@ export async function ingest(
   // from the title would write a second copy when the folder had been renamed,
   // and slicing the path at '/' to find the library gets the parent wrong on
   // Windows, where the separator is a backslash.
-  const dir = options.into ?? `${libraryDir}/${bookFolderName(book.metadata.title, book.metadata.author)}`;
+  const dir =
+    options.into ?? `${libraryDir}/${bookFolderName(book.metadata.title, book.metadata.author)}`;
   const files: OutputFile[] = [];
   const names: string[] = [];
   const wordCounts: number[] = [];
@@ -80,7 +98,10 @@ export async function ingest(
     const name = chapterFilename(chapter, chapter.title);
     names.push(name);
     const words = countWords(
-      book.blocks.slice(chapter.start, chapter.end).map((b) => b.text).join(' '),
+      book.blocks
+        .slice(chapter.start, chapter.end)
+        .map((b) => b.text)
+        .join(' '),
     );
     wordCounts.push(words);
     files.push({
@@ -110,7 +131,11 @@ export async function ingest(
     epubFile: 'book.epub',
     createdAt: new Date().toISOString(),
     chapters: chapters.map((c, i) => ({
-      index: c.index, title: c.title, start: c.start, end: c.end, chars: c.chars,
+      index: c.index,
+      title: c.title,
+      start: c.start,
+      end: c.end,
+      chars: c.chars,
       file: names[i] ?? '',
       words: wordCounts[i] ?? 0,
     })),
@@ -134,9 +159,7 @@ export async function load(dir: string) {
   if (!indexText) throw new Error(`No index.json in ${dir}`);
   // Same check as the shelf. An index with no chapter list must fail here,
   // before the reader assumes `finished` and `chapters` are arrays.
-  const parsed = tryParseBookIndex(indexText, `${dir}/index.json`);
-  if (!parsed.ok) throw new Error(parsed.error);
-  let index = parsed.index as BookIndex;
+  let index = parseBookIndex(indexText, dir);
 
   const bytes = bytesOf(await native.readFile(`${dir}/${index.epubFile}`));
   const book = openEpub(bytes);
@@ -148,51 +171,42 @@ export async function load(dir: string) {
     await resplit(dir);
     const refreshed = await native.readText(`${dir}/index.json`);
     if (!refreshed) throw new Error(`Re-split of ${dir} did not write index.json.`);
-    const again = tryParseBookIndex(refreshed, `${dir}/index.json`);
-    if (!again.ok) throw new Error(again.error);
-    index = again.index as BookIndex;
+    index = parseBookIndex(refreshed, dir);
   }
 
   // Libraries split before word counts existed carry no `words`, which the
   // reader would render as "~NaN min". Fill them in once, from the blocks we
   // just parsed, and persist so the repair happens only on first open.
-  const missingWords = index.chapters.some((c) => !Number.isFinite(c.words));
+  const missingWords = index.chapters.some(
+    (c) => c.words === undefined || !Number.isFinite(c.words),
+  );
   if (missingWords) {
     index.chapters = index.chapters.map((c) => ({
       ...c,
-      words: countWords(book.blocks.slice(c.start, c.end).map((b) => b.text).join(' ')),
+      words: countWords(
+        book.blocks
+          .slice(c.start, c.end)
+          .map((b) => b.text)
+          .join(' '),
+      ),
     }));
     index.version = 2;
     await native.writeText(`${dir}/index.json`, JSON.stringify(index, null, 2));
   }
 
   const annText = await native.readText(`${dir}/annotations.json`);
-  const annotations = (annText
-    ? parseAnnotationList(annText, `${dir}/annotations.json`)
-    : []
-  ).filter((note): note is Annotation => {
-    if (!note || typeof note !== 'object') return false;
-    const item = note as Partial<Annotation>;
-    const start = item.start;
-    const end = item.end;
-    return typeof item.quote === 'string' && item.quote.length > 0
-      && typeof item.id === 'string'
-      && Number.isFinite(item.block) && Number.isFinite(start) && Number.isFinite(end)
-      && start !== undefined && end !== undefined
-      && start >= 0 && end >= start;
-  });
+  const annotations = annText ? parseAnnotations(annText, dir) : [];
 
   // Object URLs, so the reader shows figures without inlining megabytes of
   // base64 into the DOM. Revoked when the book is closed.
   const imageUrls = new Map<string, string>();
   for (const [path, data] of book.images) {
     const copy = new Uint8Array(data);
-    imageUrls.set(path, URL.createObjectURL(new Blob([copy.buffer as ArrayBuffer])));
+    imageUrls.set(path, URL.createObjectURL(new Blob([copy.buffer])));
   }
 
   return { dir, index, blocks: book.blocks, annotations, imageUrls, notes: book.notes };
 }
-
 
 /**
  * Re-split a book already in the library, after a parser improvement.
@@ -206,15 +220,9 @@ export async function load(dir: string) {
 export async function resplit(dir: string): Promise<IngestResult & { orphaned: number }> {
   const indexText = await native.readText(`${dir}/index.json`);
   let previous: BookIndex | undefined;
-  if (indexText) {
-    const parsed = tryParseBookIndex(indexText, `${dir}/index.json`);
-    if (!parsed.ok) throw new Error(parsed.error);
-    previous = parsed.index as BookIndex;
-  }
+  if (indexText) previous = parseBookIndex(indexText, dir);
   const existingText = await native.readText(`${dir}/annotations.json`);
-  const existing: Annotation[] = existingText
-    ? parseAnnotationList(existingText, `${dir}/annotations.json`) as Annotation[]
-    : [];
+  const existing = existingText ? parseAnnotations(existingText, dir) : [];
 
   const result = await ingest(`${dir}/book.epub`, dir, { copySource: false, into: dir });
 
@@ -243,14 +251,23 @@ export async function resplit(dir: string): Promise<IngestResult & { orphaned: n
 export async function saveSplit(
   book: LoadedBook,
   cuts: CutPoint[],
+  endAt: number | null = null,
 ): Promise<BookIndex> {
-  const chapters = toChapters(cuts, book.blocks);
+  // A contents run stops before the license. The editor's cuts do not repeat
+  // that boundary, so a save would otherwise extend the last chapter to the end.
+  const limit =
+    endAt !== null && endAt > 0 && endAt < book.blocks.length ? endAt : book.blocks.length;
+  const blocks = book.blocks.slice(0, limit);
+  const chapters = toChapters(cuts, blocks);
   const files: OutputFile[] = [];
   const stored: BookIndex['chapters'] = [];
 
   for (const [i, chapter] of chapters.entries()) {
     const words = countWords(
-      book.blocks.slice(chapter.start, chapter.end).map((b) => b.text).join(' '),
+      book.blocks
+        .slice(chapter.start, chapter.end)
+        .map((b) => b.text)
+        .join(' '),
     );
     const name = chapterFilename(chapter, chapter.title);
     files.push({
@@ -264,8 +281,13 @@ export async function saveSplit(
       }),
     });
     stored.push({
-      index: i, title: chapter.title, start: chapter.start, end: chapter.end,
-      chars: chapter.chars, file: name, words,
+      index: i,
+      title: chapter.title,
+      start: chapter.start,
+      end: chapter.end,
+      chars: chapter.chars,
+      file: name,
+      words,
     });
   }
 
@@ -275,8 +297,12 @@ export async function saveSplit(
   // Keeping them would mark the wrong chapters read, so they are dropped rather
   // than silently misapplied.
   const next: BookIndex = {
-    ...book.index, version: 2, parserVersion: PARSER_VERSION,
-    chapters: stored, progress: {}, finished: [],
+    ...book.index,
+    version: 2,
+    parserVersion: PARSER_VERSION,
+    chapters: stored,
+    progress: {},
+    finished: [],
   };
   delete next.lastChapter;
   await native.writeText(`${book.dir}/index.json`, JSON.stringify(next, null, 2));

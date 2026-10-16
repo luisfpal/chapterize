@@ -72,15 +72,23 @@ function pack(opts: {
 }): Uint8Array {
   const version = opts.version ?? '3.0';
   const manifest = [
-    ...opts.docs.map((doc) =>
-      `<item id="${doc.id}" href="${doc.href}" media-type="application/xhtml+xml"${
-        doc.properties ? ` properties="${doc.properties}"` : ''}/>`),
+    ...opts.docs.map(
+      (doc) =>
+        `<item id="${doc.id}" href="${doc.href}" media-type="application/xhtml+xml"${
+          doc.properties ? ` properties="${doc.properties}"` : ''
+        }/>`,
+    ),
     ...(opts.ncx
-      ? [`<item id="${opts.ncx.id}" href="${opts.ncx.href}" media-type="application/x-dtbncx+xml"/>`]
+      ? [
+          `<item id="${opts.ncx.id}" href="${opts.ncx.href}" media-type="application/x-dtbncx+xml"/>`,
+        ]
       : []),
     ...Object.keys(opts.extras ?? {})
       .filter((path) => path.endsWith('.png'))
-      .map((path, i) => `<item id="img${i}" href="${path.replace(/^OEBPS\//, '')}" media-type="image/png"/>`),
+      .map(
+        (path, i) =>
+          `<item id="img${i}" href="${path.replace(/^OEBPS\//, '')}" media-type="image/png"/>`,
+      ),
   ].join('\n    ');
   const spine = opts.docs
     .filter((doc) => !doc.properties?.split(/\s+/).includes('nav'))
@@ -112,7 +120,8 @@ function pack(opts: {
 
 /** One file, two chapters, ids inside the headings, a page-list written first. */
 export function harborBook(): Uint8Array {
-  const story = xhtml(`
+  const story = xhtml(
+    `
     <h1><a id="salt"></a>Salt</h1>
     <p>NEVER TRUST A</p>
     <p>QUIET HARBOR</p>
@@ -132,11 +141,14 @@ export function harborBook(): Uint8Array {
       The loose sentence belongs in the chapter.
       <p>${long('The marked paragraph follows it exactly.')}</p>
     </div>
-  `, 'xmlns:epub="http://www.idpf.org/2007/ops"');
+  `,
+    'xmlns:epub="http://www.idpf.org/2007/ops"',
+  );
   const notes = xhtml(`
     <p id="n1">* Measured at dawn.</p>
   `);
-  const nav = xhtml(`
+  const nav = xhtml(
+    `
     <nav epub:type="page-list">
       <ol>
         <li><a href="story.xhtml#p1">1</a></li>
@@ -150,7 +162,9 @@ export function harborBook(): Uint8Array {
         <li><a href="story.xhtml#iron">Iron</a></li>
       </ol>
     </nav>
-  `, 'xmlns:epub="http://www.idpf.org/2007/ops"');
+  `,
+    'xmlns:epub="http://www.idpf.org/2007/ops"',
+  );
   return pack({
     title: 'Harbor Notes',
     docs: [
@@ -170,14 +184,17 @@ export function pageListOnlyBook(): Uint8Array {
     <h1 id="iron">Iron</h1>
     <p>${long('Iron remembers the hinge.')}</p>
   `);
-  const nav = xhtml(`
+  const nav = xhtml(
+    `
     <nav epub:type="page-list" id="pages">
       <ol>
         <li><a href="story.xhtml#p1">1</a></li>
         <li><a href="story.xhtml#p2">2</a></li>
       </ol>
     </nav>
-  `, 'xmlns:epub="http://www.idpf.org/2007/ops"');
+  `,
+    'xmlns:epub="http://www.idpf.org/2007/ops"',
+  );
   return pack({
     title: 'Pages Without Contents',
     docs: [
@@ -199,7 +216,8 @@ export function tocAfterPageList(kind: 'unlabeled' | 'role'): Uint8Array {
     <p>${long('Iron holds the gate.')}</p>
   `);
   const tocAttrs = kind === 'role' ? 'role="doc-toc"' : 'id="toc"';
-  const nav = xhtml(`
+  const nav = xhtml(
+    `
     <nav epub:type="page-list">
       <ol>
         <li><a href="story.xhtml#p1">1</a></li>
@@ -213,7 +231,9 @@ export function tocAfterPageList(kind: 'unlabeled' | 'role'): Uint8Array {
         <li><a href="story.xhtml#iron">Iron</a></li>
       </ol>
     </nav>
-  `, 'xmlns:epub="http://www.idpf.org/2007/ops"');
+  `,
+    'xmlns:epub="http://www.idpf.org/2007/ops"',
+  );
   return pack({
     title: 'Contents After the Page List',
     docs: [
@@ -227,7 +247,8 @@ export function tocAfterPageList(kind: 'unlabeled' | 'role'): Uint8Array {
 export function wrappedNavBook(): Uint8Array {
   const salt = xhtml(`<h1>Salt</h1><p>${long('A barrel of salt.')}</p>`);
   const iron = xhtml(`<h1>Iron</h1><p>${long('A barrel of nails.')}</p>`);
-  const nav = xhtml(`
+  const nav = xhtml(
+    `
     <nav epub:type="toc">
       <div>
         <ol>
@@ -236,7 +257,9 @@ export function wrappedNavBook(): Uint8Array {
         </ol>
       </div>
     </nav>
-  `, 'xmlns:epub="http://www.idpf.org/2007/ops"');
+  `,
+    'xmlns:epub="http://www.idpf.org/2007/ops"',
+  );
   return pack({
     title: 'Wrapped Contents',
     docs: [
@@ -254,14 +277,17 @@ export function missingFragmentBook(): Uint8Array {
     <h1 id="salt">Salt</h1>
     <p>${long('The real chapter starts here.')}</p>
   `);
-  const nav = xhtml(`
+  const nav = xhtml(
+    `
     <nav epub:type="toc">
       <ol>
         <li><a href="story.xhtml#missing">Missing</a></li>
         <li><a href="story.xhtml#salt">Salt</a></li>
       </ol>
     </nav>
-  `, 'xmlns:epub="http://www.idpf.org/2007/ops"');
+  `,
+    'xmlns:epub="http://www.idpf.org/2007/ops"',
+  );
   return pack({
     title: 'A Broken Link',
     docs: [
@@ -347,16 +373,56 @@ export function enumeratorBook(): Uint8Array {
     <h1 id="c2">Iron</h1>
     <p>${long('This label is already the title, and it must not grow a suffix.')}</p>
   `);
-  const nav = xhtml(`
+  const nav = xhtml(
+    `
     <nav epub:type="toc">
       <ol>
         <li><a href="story.xhtml#c1">Chapter 1</a></li>
         <li><a href="story.xhtml#c2">Iron</a></li>
       </ol>
     </nav>
-  `, 'xmlns:epub="http://www.idpf.org/2007/ops"');
+  `,
+    'xmlns:epub="http://www.idpf.org/2007/ops"',
+  );
   return pack({
     title: 'Enumerated',
+    docs: [
+      { id: 'nav', href: 'nav.xhtml', html: nav, properties: 'nav' },
+      { id: 'story', href: 'story.xhtml', html: story },
+    ],
+  });
+}
+
+/**
+ * Chapter I is shorter than the stub floor. A preface and a license sit
+ * outside the numbered run and are not chapters.
+ */
+export function shortFirstChapterBook(): Uint8Array {
+  const story = xhtml(`
+    <h1 id="preface">Preface</h1>
+    <p>${long('The preface is not a numbered chapter.')}</p>
+    <h1 id="c1">Chapter I</h1>
+    <p>A short opening.</p>
+    <h1 id="c2">Chapter II</h1>
+    <p>${long('The second chapter is long enough to stand on its own.')}</p>
+    <h1 id="license">License</h1>
+    <p>${long('The license is back matter and must not become a chapter.')}</p>
+  `);
+  const nav = xhtml(
+    `
+    <nav epub:type="toc">
+      <ol>
+        <li><a href="story.xhtml#preface">Preface</a></li>
+        <li><a href="story.xhtml#c1">Chapter I</a></li>
+        <li><a href="story.xhtml#c2">Chapter II</a></li>
+        <li><a href="story.xhtml#license">License</a></li>
+      </ol>
+    </nav>
+  `,
+    'xmlns:epub="http://www.idpf.org/2007/ops"',
+  );
+  return pack({
+    title: 'Short Opening',
     docs: [
       { id: 'nav', href: 'nav.xhtml', html: nav, properties: 'nav' },
       { id: 'story', href: 'story.xhtml', html: story },
@@ -372,14 +438,17 @@ export function partDividerBook(): Uint8Array {
     <h1 id="salt">Salt</h1>
     <p>${long('The part heading belongs to this chapter, not to a chapter of its own.')}</p>
   `);
-  const nav = xhtml(`
+  const nav = xhtml(
+    `
     <nav epub:type="toc">
       <ol>
         <li><a href="story.xhtml#part">Part One</a></li>
         <li><a href="story.xhtml#salt">Salt</a></li>
       </ol>
     </nav>
-  `, 'xmlns:epub="http://www.idpf.org/2007/ops"');
+  `,
+    'xmlns:epub="http://www.idpf.org/2007/ops"',
+  );
   return pack({
     title: 'Parts',
     docs: [

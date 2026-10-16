@@ -1,3 +1,4 @@
+import { must } from './must.js';
 import type { Block } from './types.js';
 
 export interface Hit {
@@ -22,7 +23,7 @@ function foldWithMap(text: string): { folded: string; map: number[] | null } {
   const map: number[] = [];
   for (let i = 0; i < text.length;) {
     const cp = text.codePointAt(i);
-    const ch = cp === undefined ? text[i]! : String.fromCodePoint(cp);
+    const ch = cp === undefined ? must(text[i], 'text[i]') : String.fromCodePoint(cp);
     const low = ch.toLowerCase();
     for (let k = 0; k < low.length; k++) map.push(i);
     folded += low;
@@ -66,7 +67,7 @@ export function search(
 
   const hits: Hit[] = [];
   for (let b = 0; b < blocks.length && hits.length < limit; b++) {
-    const text = blocks[b]!.text;
+    const text = must(blocks[b], 'blocks[b]').text;
     const { folded, map } = foldWithMap(text);
     let from = 0;
     while (hits.length < limit) {

@@ -1,8 +1,13 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import {
-  countWords, deriveTitles, detect, findBoilerplate, mergeStubs, readingMinutes, slugify,
-  toChapters,
+  countWords,
+  detect,
+  findBoilerplate,
+  must,
+  readingChapters,
+  readingMinutes,
+  slugify,
 } from '@chapterize/core';
 import type { Book, Chapter } from '@chapterize/core';
 import { CliError } from './errors.js';
@@ -28,18 +33,22 @@ export interface BundleFile {
 
 export function prepare(book: Book): Prepared {
   const detection = detect(book);
-  const cuts = mergeStubs(detection.cuts, book.blocks, STUB_CHARS);
-  const chapters = deriveTitles(toChapters(cuts, book.blocks), book.blocks);
-  const words = chapters.map((chapter) => countWords(
-    book.blocks.slice(chapter.start, chapter.end).map((block) => block.text).join(' '),
-  ));
+  const chapters = readingChapters(book, detection.cuts, STUB_CHARS);
+  const words = chapters.map((chapter) =>
+    countWords(
+      book.blocks
+        .slice(chapter.start, chapter.end)
+        .map((block) => block.text)
+        .join(' '),
+    ),
+  );
   const minutes = words.map((count) => readingMinutes(count));
   const warnings: string[] = [];
   const real = detection.unresolved.filter((entry) => entry.reason !== 'document-has-no-text');
   if (real.length) {
     warnings.push(
       `${real.length} table-of-contents ${real.length === 1 ? 'entry' : 'entries'} could not be located; ` +
-      'those chapters start at the top of their file.',
+        'those chapters start at the top of their file.',
     );
   }
   if (detection.strategy !== 'toc') {
@@ -69,7 +78,10 @@ function utf8(s: string): Uint8Array {
   return new TextEncoder().encode(s);
 }
 
-export function buildBundle(book: Book, opts: { epubs: boolean }): { files: BundleFile[]; prepared: Prepared } {
+export function buildBundle(
+  book: Book,
+  opts: { epubs: boolean },
+): { files: BundleFile[]; prepared: Prepared } {
   if (book.blocks.length === 0) {
     throw new CliError(
       `"${book.metadata.title}" has no readable text. If it came from a store it may be DRM-protected, which has to be removed before it can be opened.`,
@@ -90,14 +102,17 @@ export function buildBundle(book: Book, opts: { epubs: boolean }): { files: Bund
   const manifestChapters: Record<string, string | number>[] = [];
 
   for (let i = 0; i < prepared.chapters.length; i++) {
-    const chapter = prepared.chapters[i]!;
-    const base = bases[i]!;
+    const chapter = must(prepared.chapters[i], 'prepared.chapters[i]');
+    const base = must(bases[i], 'bases[i]');
     const file = `chapters/${base}.html`;
     const epubPath = `epub/${base}.epub`;
-    const prev = i > 0 ? `${bases[i - 1]}.html` : undefined;
-    const next = i + 1 < bases.length ? `${bases[i + 1]}.html` : undefined;
+    const prevBase = i > 0 ? must(bases[i - 1], `chapter file ${i - 1}`) : undefined;
+    const nextBase = i + 1 < bases.length ? must(bases[i + 1], `chapter file ${i + 1}`) : undefined;
+    const prev = prevBase !== undefined ? `${prevBase}.html` : undefined;
+    const next = nextBase !== undefined ? `${nextBase}.html` : undefined;
     let left = 0;
-    for (let j = i; j < prepared.minutes.length; j++) left += prepared.minutes[j]!;
+    for (let j = i; j < prepared.minutes.length; j++)
+      left += must(prepared.minutes[j], 'prepared.minutes[j]');
     const rendered = renderBody({
       blocks: book.blocks.slice(chapter.start, chapter.end),
       notes: book.notes,
@@ -116,11 +131,16 @@ export function buildBundle(book: Book, opts: { epubs: boolean }): { files: Bund
       chapterTitle: chapter.title,
       index: chapter.index,
       total: prepared.chapters.length,
-      minutes: prepared.minutes[i]!,
+      minutes: must(prepared.minutes[i], 'prepared.minutes[i]'),
       leftMinutes: left,
       file,
       ...(prev !== undefined ? { prevHref: prev } : {}),
-      ...(next !== undefined ? { nextHref: next, nextTitle: prepared.chapters[i + 1]!.title } : {}),
+      ...(next !== undefined
+        ? {
+            nextHref: next,
+            nextTitle: must(prepared.chapters[i + 1], 'prepared.chapters[i + 1]').title,
+          }
+        : {}),
       ...(opts.epubs ? { epubHref: `../${epubPath}` } : {}),
       body: rendered.body,
       notesHtml: rendered.notesHtml,
@@ -135,7 +155,7 @@ export function buildBundle(book: Book, opts: { epubs: boolean }): { files: Bund
     rows.push({
       href: file,
       title: chapter.title,
-      minutes: prepared.minutes[i]!,
+      minutes: must(prepared.minutes[i], 'prepared.minutes[i]'),
       depth: chapter.depth,
       n: i + 1,
     });
@@ -143,8 +163,8 @@ export function buildBundle(book: Book, opts: { epubs: boolean }): { files: Bund
       index: chapter.index,
       title: chapter.title,
       file,
-      minutes: prepared.minutes[i]!,
-      words: prepared.words[i]!,
+      minutes: must(prepared.minutes[i], 'prepared.minutes[i]'),
+      words: must(prepared.words[i], 'prepared.words[i]'),
       depth: chapter.depth,
     };
     if (opts.epubs) row.epub = epubPath;

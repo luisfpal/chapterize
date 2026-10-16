@@ -1,14 +1,50 @@
-import { unzipSync } from 'fflate';
+import { isText } from 'domhandler';
 import type { AnyNode, Document, Element } from 'domhandler';
-import type { Block, Book, BookMetadata, NoteRef, SpineItem, TocEntry } from './types.js';
-import { attr, children, findAll, findFirst, isElement, parseHtml, parseXml, textOf } from './xml.js';
+import { unzipSync } from 'fflate';
+import type {
+  Block,
+  Book,
+  BookMetadata,
+  HeadingLevel,
+  NoteRef,
+  SpineItem,
+  TocEntry,
+} from './types.js';
+import { must } from './must.js';
+import {
+  attr,
+  children,
+  findAll,
+  findFirst,
+  isElement,
+  parseHtml,
+  parseXml,
+  textOf,
+} from './xml.js';
 
 const CONTAINER = 'META-INF/container.xml';
 
 /** Elements that carry their own line in the reading flow. */
 const BLOCK_TAGS = new Set([
-  'p', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'blockquote',
-  'pre', 'figcaption', 'td', 'th', 'dt', 'dd', 'section', 'article', 'aside',
+  'p',
+  'div',
+  'h1',
+  'h2',
+  'h3',
+  'h4',
+  'h5',
+  'h6',
+  'li',
+  'blockquote',
+  'pre',
+  'figcaption',
+  'td',
+  'th',
+  'dt',
+  'dd',
+  'section',
+  'article',
+  'aside',
 ]);
 
 /**
@@ -16,16 +52,41 @@ const BLOCK_TAGS = new Set([
  * NO attributes survive — the rendered HTML carries no href, src or handler, so
  * book content cannot reach anything outside the paragraph it lives in.
  */
-const INLINE_KEEP = new Set(['em', 'i', 'strong', 'b', 'sup', 'sub', 'code', 'cite', 'q', 'small', 'u']);
+const INLINE_KEEP = new Set([
+  'em',
+  'i',
+  'strong',
+  'b',
+  'sup',
+  'sub',
+  'code',
+  'cite',
+  'q',
+  'small',
+  'u',
+]);
 
 /** One footnote, as opposed to the section that holds several of them. */
 const NOTE_TYPES = new Set(['footnote', 'endnote', 'rearnote', 'doc-footnote', 'doc-endnote']);
 
-const NOTE_GROUPS = new Set(['footnotes', 'endnotes', 'rearnotes', 'doc-endnotes', 'doc-footnotes']);
+const NOTE_GROUPS = new Set([
+  'footnotes',
+  'endnotes',
+  'rearnotes',
+  'doc-endnotes',
+  'doc-footnotes',
+]);
 
 /** A nav that must never be read as the table of contents. */
 const AUX_NAV = new Set([
-  'page-list', 'landmarks', 'lot', 'loi', 'loa', 'lov', 'doc-pagelist', 'doc-landmarks',
+  'page-list',
+  'landmarks',
+  'lot',
+  'loi',
+  'loa',
+  'lov',
+  'doc-pagelist',
+  'doc-landmarks',
 ]);
 
 const CONTENT_FILE = /\.(xhtml|html|htm|opf|ncx)(?:$|\?)/i;
@@ -121,7 +182,7 @@ function indexArchive(entries: Record<string, Uint8Array>): Archive {
 function latin1Prefix(bytes: Uint8Array, n: number): string {
   const end = Math.min(bytes.length, n);
   let out = '';
-  for (let i = 0; i < end; i++) out += String.fromCharCode(bytes[i]!);
+  for (let i = 0; i < end; i++) out += String.fromCharCode(must(bytes[i], 'bytes[i]'));
   return out;
 }
 
@@ -148,10 +209,10 @@ function normalizeEncoding(label: string): string {
  * the text the reader had highlighted.
  */
 function decode(bytes: Uint8Array, path: string): string {
-  if (bytes.length >= 2 && bytes[0] === 0xFE && bytes[1] === 0xFF) {
+  if (bytes.length >= 2 && bytes[0] === 0xfe && bytes[1] === 0xff) {
     return new TextDecoder('utf-16be').decode(bytes);
   }
-  if (bytes.length >= 2 && bytes[0] === 0xFF && bytes[1] === 0xFE) {
+  if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xfe) {
     return new TextDecoder('utf-16le').decode(bytes);
   }
   const declared = declaredEncoding(bytes);
@@ -231,7 +292,7 @@ export function openEpub(bytes: Uint8Array): Book {
     const detail = cause instanceof Error && cause.message ? ` (${cause.message})` : '';
     throw new EpubError(
       `Cannot open this file as an EPUB: it is not a valid ZIP archive${detail}. ` +
-      'If it came from a store, it may be DRM-protected — remove the DRM and try again.',
+        'If it came from a store, it may be DRM-protected — remove the DRM and try again.',
     );
   }
   const archive = indexArchive(entries);
@@ -386,10 +447,12 @@ function readMetadata(opf: Document, pkg: Element | undefined): BookMetadata {
     const value = el ? textOf(el) : '';
     return value || undefined;
   };
+  const author = pick('creator');
+  const language = pick('language');
   return {
     title: pick('title') ?? 'Untitled',
-    ...(pick('creator') !== undefined ? { author: pick('creator')! } : {}),
-    ...(pick('language') !== undefined ? { language: pick('language')! } : {}),
+    ...(author !== undefined ? { author } : {}),
+    ...(language !== undefined ? { language } : {}),
     epubVersion: (pkg && attr(pkg, 'version')) || '2.0',
   };
 }
@@ -418,7 +481,8 @@ function isAuxNav(el: Element): boolean {
 function readNav(source: string, navPath: string, requireTocType: boolean): TocEntry[] {
   const doc = parseHtml(source);
   const navs = findAll(doc, 'nav');
-  const tocNav = navs.find(isTocNav) ?? (requireTocType ? undefined : navs.find((n) => !isAuxNav(n)));
+  const tocNav =
+    navs.find(isTocNav) ?? (requireTocType ? undefined : navs.find((n) => !isAuxNav(n)));
   if (!tocNav) return [];
 
   const out: TocEntry[] = [];
@@ -462,9 +526,9 @@ function topLists(nav: Element): Element[] {
 function sublists(li: Element): Element[] {
   const direct = children(li, 'ol');
   if (direct.length) return direct;
-  const nested = findAll(li, 'ol').filter((ol) => !findAll(li, 'ol').some(
-    (other) => other !== ol && containsNode(other, ol),
-  ));
+  const nested = findAll(li, 'ol').filter(
+    (ol) => !findAll(li, 'ol').some((other) => other !== ol && containsNode(other, ol)),
+  );
   return nested;
 }
 
@@ -507,8 +571,9 @@ function loadToc(
   archive: Archive,
 ): { toc: TocEntry[]; tocSource: Book['tocSource'] } {
   const items = [...manifest.values()];
-  const navItem = items.find((m) => m.properties.split(/\s+/).includes('nav'))
-    ?? items.find((m) => /(?:^|\/)nav\.xhtml$/i.test(m.path));
+  const navItem =
+    items.find((m) => m.properties.split(/\s+/).includes('nav')) ??
+    items.find((m) => /(?:^|\/)nav\.xhtml$/i.test(m.path));
   if (navItem) {
     const bytes = archive.get(navItem.path);
     if (bytes) {
@@ -518,8 +583,9 @@ function loadToc(
   }
 
   const ncxId = spineEl ? attr(spineEl, 'toc') : undefined;
-  const ncx = (ncxId ? manifest.get(ncxId) : undefined)
-    ?? items.find((m) => m.mediaType.includes('ncx') || m.path.toLowerCase().endsWith('.ncx'));
+  const ncx =
+    (ncxId ? manifest.get(ncxId) : undefined) ??
+    items.find((m) => m.mediaType.includes('ncx') || m.path.toLowerCase().endsWith('.ncx'));
   if (ncx) {
     const bytes = archive.get(ncx.path);
     if (bytes) {
@@ -558,8 +624,8 @@ function escapeHtml(s: string): string {
 function serializeNodes(nodes: AnyNode[]): string {
   let out = '';
   const walk = (n: AnyNode): void => {
-    if (n.type === 'text') {
-      out += escapeHtml((n as unknown as { data: string }).data);
+    if (isText(n)) {
+      out += escapeHtml(n.data);
       return;
     }
     if (!isElement(n)) return;
@@ -573,7 +639,7 @@ function serializeNodes(nodes: AnyNode[]): string {
     const emitted = isNoteref ? 'noteref' : tag;
     const keep = isNoteref || INLINE_KEEP.has(tag);
     if (keep) out += `<${emitted}>`;
-    for (const child of (n.children ?? []) as AnyNode[]) walk(child);
+    for (const child of n.children) walk(child);
     if (keep) out += `</${emitted}>`;
   };
   for (const node of nodes) walk(node);
@@ -584,9 +650,7 @@ function normaliseInlineHtml(html: string): string {
   let cur = html;
   // Nesting: the inner tag has to shed its space before the outer one can.
   for (let i = 0; i < 8; i++) {
-    const next = cur
-      .replace(/<([a-z0-9]+)>\s+/g, ' <$1>')
-      .replace(/\s+<\/([a-z0-9]+)>/g, '</$1> ');
+    const next = cur.replace(/<([a-z0-9]+)>\s+/g, ' <$1>').replace(/\s+<\/([a-z0-9]+)>/g, '</$1> ');
     if (next === cur) break;
     cur = next;
   }
@@ -601,7 +665,7 @@ function idsIn(node: AnyNode): string[] {
     if (!isElement(n)) return;
     const id = attr(n, 'id');
     if (id) out.push(id);
-    for (const child of (n.children ?? []) as AnyNode[]) walk(child);
+    for (const child of n.children) walk(child);
   };
   walk(node);
   return out;
@@ -632,11 +696,60 @@ const DANGLING = /[,;\u2013\u2014-]\s*$/;
  * converter, not by the author.
  */
 const FUNCTION_WORDS = new Set([
-  'the', 'a', 'an', 'and', 'or', 'but', 'of', 'in', 'to', 'for', 'with', 'at',
-  'by', 'from', 'as', 'is', 'was', 'were', 'are', 'be', 'been', 'that', 'which',
-  'who', 'his', 'her', 'its', 'their', 'this', 'these', 'those', 'on', 'into',
-  'than', 'then', 'when', 'while', 'if', 'not', 'no', 'so', 'he', 'she', 'they',
-  'it', 'you', 'we', 'i', 'him', 'them', 'us', 'my', 'your', 'our',
+  'the',
+  'a',
+  'an',
+  'and',
+  'or',
+  'but',
+  'of',
+  'in',
+  'to',
+  'for',
+  'with',
+  'at',
+  'by',
+  'from',
+  'as',
+  'is',
+  'was',
+  'were',
+  'are',
+  'be',
+  'been',
+  'that',
+  'which',
+  'who',
+  'his',
+  'her',
+  'its',
+  'their',
+  'this',
+  'these',
+  'those',
+  'on',
+  'into',
+  'than',
+  'then',
+  'when',
+  'while',
+  'if',
+  'not',
+  'no',
+  'so',
+  'he',
+  'she',
+  'they',
+  'it',
+  'you',
+  'we',
+  'i',
+  'him',
+  'them',
+  'us',
+  'my',
+  'your',
+  'our',
 ]);
 
 function lastWord(text: string): string {
@@ -664,24 +777,24 @@ function joinWrappedLines(blocks: Block[]): Block[] {
   const out: Block[] = [];
   for (const block of blocks) {
     const prev = out[out.length - 1];
-    const structurallyJoinable =
+    if (
       prev !== undefined &&
-      prev.heading === 0 && block.heading === 0 &&
-      prev.image === undefined && block.image === undefined &&
-      prev.tag === 'p' && block.tag === 'p' &&
+      prev.heading === 0 &&
+      block.heading === 0 &&
+      prev.image === undefined &&
+      block.image === undefined &&
+      prev.tag === 'p' &&
+      block.tag === 'p' &&
       prev.path === block.path &&
-      prev.text.length > 0 && block.text.length > 0 &&
+      prev.text.length > 0 &&
+      block.text.length > 0 &&
       !isDisplayLine(prev.text) &&
       !isDisplayLine(block.text) &&
-      !TERMINAL.test(prev.text);
-
-    const continues =
-      structurallyJoinable &&
+      !TERMINAL.test(prev.text) &&
       (/^[a-z]/.test(block.text) ||
-        DANGLING.test(prev!.text) ||
-        FUNCTION_WORDS.has(lastWord(prev!.text)));
-
-    if (continues && prev) {
+        DANGLING.test(prev.text) ||
+        FUNCTION_WORDS.has(lastWord(prev.text)))
+    ) {
       prev.text = `${prev.text} ${block.text}`;
       prev.html = `${prev.html} ${block.html}`;
       prev.ids.push(...block.ids);
@@ -699,10 +812,9 @@ function stripNoteMarker(text: string): string {
   // the footnote repeats. So is "1 Measured", where the number introduces a
   // capitalised sentence. A number that continues in words ("12 men remained")
   // is the note itself, and stripping it deletes what the author wrote.
-  return text.replace(
-    /^\s*(?:[*\u2020\u2021\u00a7]+|\d{1,3}[.)]|\d{1,3}(?=\s+[A-Z]))\s+/,
-    '',
-  ).trim();
+  return text
+    .replace(/^\s*(?:[*\u2020\u2021\u00a7]+|\d{1,3}[.)]|\d{1,3}(?=\s+[A-Z]))\s+/, '')
+    .trim();
 }
 
 function isFootnote(el: Element): boolean {
@@ -717,7 +829,8 @@ function isNoteGroup(el: Element): boolean {
 
 function collectNoterefs(el: Element, path: string): NoteRef[] {
   const out: NoteRef[] = [];
-  const anchors = el.name.toLowerCase() === 'a' ? [el, ...findAll(el, 'a').slice(1)] : findAll(el, 'a');
+  const anchors =
+    el.name.toLowerCase() === 'a' ? [el, ...findAll(el, 'a').slice(1)] : findAll(el, 'a');
   for (const anchor of anchors) {
     if (!typeTokens(anchor).some((token) => token.includes('noteref'))) continue;
     const href = attr(anchor, 'href');
@@ -744,7 +857,7 @@ function noteTargetsIn(doc: Document | Element, docPath: string): Set<string> {
 }
 
 function hasBlockDescendant(el: Element): boolean {
-  for (const child of (el.children ?? []) as AnyNode[]) {
+  for (const child of el.children) {
     if (!isElement(child)) continue;
     const tag = child.name.toLowerCase();
     if (tag === 'script' || tag === 'style') continue;
@@ -759,6 +872,26 @@ interface NoteHit {
   text: string;
 }
 
+/** h1–h6, or 0. A tag outside that set is not a heading, whatever its name. */
+function headingLevel(tag: string): HeadingLevel {
+  switch (tag) {
+    case 'h1':
+      return 1;
+    case 'h2':
+      return 2;
+    case 'h3':
+      return 3;
+    case 'h4':
+      return 4;
+    case 'h5':
+      return 5;
+    case 'h6':
+      return 6;
+    default:
+      return 0;
+  }
+}
+
 function blockFrom(
   spineIndex: number,
   path: string,
@@ -770,13 +903,12 @@ function blockFrom(
   noterefs: NoteRef[],
 ): Block | undefined {
   if (!text && !ids.length && !image.src) return undefined;
-  const headingMatch = /^h([1-6])$/.exec(tag);
   return {
     spineIndex,
     path,
     ids,
     tag,
-    heading: headingMatch ? Number(headingMatch[1]) : 0,
+    heading: headingLevel(tag),
     text,
     html,
     ...(image.src !== undefined ? { image: image.src } : {}),
@@ -787,9 +919,9 @@ function blockFrom(
 
 /** Every figure in document order. A paragraph can hold more than one. */
 function imagesIn(nodes: AnyNode[], base: string): { src: string; alt?: string }[] {
-  const found = nodes.flatMap((node) => (
-    isElement(node) ? [node, ...findAll(node, 'img'), ...findAll(node, 'image')] : []
-  ));
+  const found = nodes.flatMap((node) =>
+    isElement(node) ? [node, ...findAll(node, 'img'), ...findAll(node, 'image')] : [],
+  );
   const out: { src: string; alt?: string }[] = [];
   const seen = new Set<Element>();
   for (const el of found) {
@@ -853,8 +985,11 @@ function collectBlocks(
     for (const id of unique(idsIn(el))) notes.push({ key: `${path}#${id}`, text });
   };
 
-  const isNote = (el: Element): boolean =>
-    isFootnote(el) || (attr(el, 'id') !== undefined && targets.has(attr(el, 'id')!));
+  const isNote = (el: Element): boolean => {
+    if (isFootnote(el)) return true;
+    const id = attr(el, 'id');
+    return id !== undefined && targets.has(id);
+  };
 
   const emitExtras = (images: { src: string; alt?: string }[]): void => {
     // A block carries one image. Further figures in the same paragraph used
@@ -881,7 +1016,7 @@ function collectBlocks(
       unique([...takePending(), ...idsIn(el)]),
       tag,
       text,
-      serializeNodes((el.children ?? []) as AnyNode[]),
+      serializeNodes(el.children),
       image,
       collectNoterefs(el, path),
     );
@@ -916,7 +1051,7 @@ function collectBlocks(
     emitExtras(images);
   };
 
-  const walk = (node: Element, inherited?: string): void => {
+  const walk = (node: Element | Document, inherited?: string): void => {
     let inline: AnyNode[] = [];
     const flush = (): void => {
       const nodes = inline;
@@ -925,8 +1060,8 @@ function collectBlocks(
       // list or a quotation it stays one, rather than becoming a paragraph.
       emitInline(nodes, inherited ?? 'p');
     };
-    for (const child of (node.children ?? []) as AnyNode[]) {
-      if (child.type === 'text') {
+    for (const child of node.children) {
+      if (isText(child)) {
         inline.push(child);
         continue;
       }
@@ -979,11 +1114,11 @@ function collectBlocks(
     walk(body);
   } else {
     // No <body>: walk the document's children. `walk` only reads `children`.
-    walk(doc as unknown as Element);
+    walk(doc);
   }
 
   if (pendingIds.length && blocks.length) {
-    const last = blocks[blocks.length - 1]!;
+    const last = must(blocks[blocks.length - 1], 'blocks[blocks.length - 1]');
     if (last.path === path) last.ids.push(...pendingIds);
   }
   return { blocks, notes };

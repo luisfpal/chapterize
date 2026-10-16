@@ -5,7 +5,9 @@ import { CliError } from './errors.js';
 
 function assertBundlePath(filePath: string): void {
   if (filePath.startsWith('/') || filePath.includes('\\') || filePath.split('/').includes('..')) {
-    throw new CliError(`Refusing to write "${filePath}": a bundle path stays inside the output folder.`);
+    throw new CliError(
+      `Refusing to write "${filePath}": a bundle path stays inside the output folder.`,
+    );
   }
 }
 

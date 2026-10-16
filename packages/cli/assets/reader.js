@@ -52,7 +52,12 @@ var ChapterizeReader = (function () {
   // Hash-only and absolute links are left alone. A footnote is a hash, and
   // adding a query to it would reload the chapter.
   function withPrefs(href, theme, size) {
-    if (!href || href.charAt(0) === '#' || href.slice(0, 2) === '//' || /^[a-z][a-z0-9+.-]*:/i.test(href)) {
+    if (
+      !href ||
+      href.charAt(0) === '#' ||
+      href.slice(0, 2) === '//' ||
+      /^[a-z][a-z0-9+.-]*:/i.test(href)
+    ) {
       return href;
     }
     var hash = '';
@@ -91,12 +96,18 @@ var ChapterizeReader = (function () {
     var posKey = 'chapterize-pos:' + book;
 
     function read(key) {
-      try { return localStorage.getItem(key); }
-      catch (e) { return null; } // private mode: the page still reads
+      try {
+        return localStorage.getItem(key);
+      } catch {
+        return null;
+      } // private mode: the page still reads
     }
     function write(key, value) {
-      try { localStorage.setItem(key, value); }
-      catch (e) { /* preferences are optional */ }
+      try {
+        localStorage.setItem(key, value);
+      } catch {
+        /* preferences are optional */
+      }
     }
 
     var chosen = prefsFromSearch(location.search, read(themeKey), read(sizeKey));
@@ -106,7 +117,10 @@ var ChapterizeReader = (function () {
     if (location.search.indexOf('size=') >= 0) write(sizeKey, String(size));
 
     function effectiveDark() {
-      return theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+      return (
+        theme === 'dark' ||
+        (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
+      );
     }
     function apply() {
       if (theme === 'light' || theme === 'dark') root.setAttribute('data-theme', theme);
@@ -132,7 +146,10 @@ var ChapterizeReader = (function () {
       var node = event.target;
       var btn = null;
       while (node && node !== document) {
-        if (node.getAttribute && node.getAttribute('data-action')) { btn = node; break; }
+        if (node.getAttribute && node.getAttribute('data-action')) {
+          btn = node;
+          break;
+        }
         node = node.parentNode;
       }
       if (!btn) return;
@@ -151,7 +168,9 @@ var ChapterizeReader = (function () {
       decorate(indexHref());
     });
 
-    function go(href) { if (href) window.location.href = withPrefs(href, theme, size); }
+    function go(href) {
+      if (href) window.location.href = withPrefs(href, theme, size);
+    }
 
     function indexHref() {
       var file = body.getAttribute('data-file');
@@ -171,7 +190,11 @@ var ChapterizeReader = (function () {
         }
         if (!raw || raw.charAt(0) === '#') continue;
         var href = raw;
-        if (extra && node.classList && (node.classList.contains('booklink') || node.classList.contains('pos'))) {
+        if (
+          extra &&
+          node.classList &&
+          (node.classList.contains('booklink') || node.classList.contains('pos'))
+        ) {
           href = extra;
         }
         node.setAttribute('href', withPrefs(href, theme, size));
@@ -204,26 +227,42 @@ var ChapterizeReader = (function () {
     var startX = 0;
     var startY = 0;
     var tracking = false;
-    document.addEventListener('touchstart', function (event) {
-      if (event.touches.length !== 1) { tracking = false; return; }
-      var t = event.target;
-      if (t && t.closest && t.closest('a, button, pre')) { tracking = false; return; }
-      startX = event.touches[0].clientX;
-      startY = event.touches[0].clientY;
-      tracking = true;
-    }, { passive: true });
-    document.addEventListener('touchend', function (event) {
-      if (!tracking) return;
+    document.addEventListener(
+      'touchstart',
+      function (event) {
+        if (event.touches.length !== 1) {
+          tracking = false;
+          return;
+        }
+        var t = event.target;
+        if (t && t.closest && t.closest('a, button, pre')) {
+          tracking = false;
+          return;
+        }
+        startX = event.touches[0].clientX;
+        startY = event.touches[0].clientY;
+        tracking = true;
+      },
+      { passive: true },
+    );
+    document.addEventListener(
+      'touchend',
+      function (event) {
+        if (!tracking) return;
+        tracking = false;
+        var touch = event.changedTouches[0];
+        if (!touch) return;
+        var selected = window.getSelection && String(window.getSelection());
+        if (selected) return;
+        var dir = swipe(touch.clientX - startX, touch.clientY - startY, startX);
+        if (dir === 'next') go(body.getAttribute('data-next'));
+        else if (dir === 'prev') go(body.getAttribute('data-prev'));
+      },
+      { passive: true },
+    );
+    document.addEventListener('touchcancel', function () {
       tracking = false;
-      var touch = event.changedTouches[0];
-      if (!touch) return;
-      var selected = window.getSelection && String(window.getSelection());
-      if (selected) return;
-      var dir = swipe(touch.clientX - startX, touch.clientY - startY, startX);
-      if (dir === 'next') go(body.getAttribute('data-next'));
-      else if (dir === 'prev') go(body.getAttribute('data-prev'));
-    }, { passive: true });
-    document.addEventListener('touchcancel', function () { tracking = false; });
+    });
 
     function writePos() {
       var file = body.getAttribute('data-file');
@@ -237,7 +276,9 @@ var ChapterizeReader = (function () {
         var parsed = JSON.parse(raw);
         if (!parsed || typeof parsed.file !== 'string' || typeof parsed.y !== 'number') return null;
         return parsed;
-      } catch (e) { return null; }
+      } catch {
+        return null;
+      }
     }
 
     var queried = placeFromSearch(location.search);
@@ -247,28 +288,39 @@ var ChapterizeReader = (function () {
       var file = body.getAttribute('data-file');
       var y = queried.y;
       if (!(y > 0) && here && here.file === file) y = here.y;
-      if (y > 0) requestAnimationFrame(function () { window.scrollTo(0, y); });
+      if (y > 0)
+        requestAnimationFrame(function () {
+          window.scrollTo(0, y);
+        });
       writePos();
       var lastY = window.scrollY;
       var saveTimer = 0;
-      window.addEventListener('scroll', function () {
-        var y = window.scrollY;
-        if (y < 8) body.classList.remove('chrome-hidden');
-        else if (y > lastY + 8) body.classList.add('chrome-hidden');
-        else if (y < lastY - 8) body.classList.remove('chrome-hidden');
-        lastY = y;
-        var range = document.documentElement.scrollHeight - window.innerHeight;
-        var bar = document.getElementById('progress');
-        if (bar) bar.style.width = (range > 0 ? (100 * y / range) : 0) + '%';
-        var back = indexHref();
-        if (back) {
-          var backs = document.querySelectorAll('a.booklink, a.pos');
-          for (var b = 0; b < backs.length; b++) backs[b].setAttribute('href', withPrefs(back, theme, size));
-        }
-        if (!saveTimer) {
-          saveTimer = setTimeout(function () { saveTimer = 0; writePos(); }, 400);
-        }
-      }, { passive: true });
+      window.addEventListener(
+        'scroll',
+        function () {
+          var y = window.scrollY;
+          if (y < 8) body.classList.remove('chrome-hidden');
+          else if (y > lastY + 8) body.classList.add('chrome-hidden');
+          else if (y < lastY - 8) body.classList.remove('chrome-hidden');
+          lastY = y;
+          var range = document.documentElement.scrollHeight - window.innerHeight;
+          var bar = document.getElementById('progress');
+          if (bar) bar.style.width = (range > 0 ? (100 * y) / range : 0) + '%';
+          var back = indexHref();
+          if (back) {
+            var backs = document.querySelectorAll('a.booklink, a.pos');
+            for (var b = 0; b < backs.length; b++)
+              backs[b].setAttribute('href', withPrefs(back, theme, size));
+          }
+          if (!saveTimer) {
+            saveTimer = setTimeout(function () {
+              saveTimer = 0;
+              writePos();
+            }, 400);
+          }
+        },
+        { passive: true },
+      );
       window.addEventListener('pagehide', writePos);
     }
 
@@ -310,7 +362,7 @@ var ChapterizeReader = (function () {
     withPrefs: withPrefs,
     placeFromSearch: placeFromSearch,
     sizes: sizes,
-    boot: boot
+    boot: boot,
   };
 })();
 

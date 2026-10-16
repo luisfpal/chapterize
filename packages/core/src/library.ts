@@ -26,14 +26,15 @@ export function carryBookState<T extends { createdAt: string; sentToKindle?: str
  * to do about it. A corrupt `annotations.json` then looks like the app is
  * broken, and the book underneath it will not open.
  */
-export function parseStoredJson<T>(text: string, what: string): T {
+export function parseStoredJson(text: string, what: string): unknown {
   try {
-    return JSON.parse(text) as T;
+    return JSON.parse(text) as unknown;
   } catch (cause) {
     const detail = cause instanceof Error ? cause.message : String(cause);
     throw new Error(
       `${what} is not valid JSON (${detail}). The file was not modified. ` +
-      'Restore it from a backup, or correct it by hand, then open the book again.',
+        'Restore it from a backup, or correct it by hand, then open the book again.',
+      { cause },
     );
   }
 }
@@ -47,11 +48,12 @@ export function parseStoredJson<T>(text: string, what: string): T {
 export function tryParseBookIndex(
   text: string,
   what: string,
-): { ok: true; index: { title: string; chapters: unknown[]; finished: unknown[] } }
+):
+  | { ok: true; index: { title: string; chapters: unknown[]; finished: unknown[] } }
   | { ok: false; error: string } {
   let value: unknown;
   try {
-    value = parseStoredJson<unknown>(text, what);
+    value = parseStoredJson(text, what);
   } catch (cause) {
     return { ok: false, error: cause instanceof Error ? cause.message : String(cause) };
   }
@@ -72,7 +74,10 @@ export function tryParseBookIndex(
         'Restore it from a backup, or correct it by hand.',
     };
   }
-  if (!Array.isArray(record.chapters) || record.chapters.some((chapter) => !chapter || typeof chapter !== 'object')) {
+  if (
+    !Array.isArray(record.chapters) ||
+    record.chapters.some((chapter) => !chapter || typeof chapter !== 'object')
+  ) {
     return {
       ok: false,
       error:
@@ -99,11 +104,11 @@ export function tryParseBookIndex(
  * which file to repair.
  */
 export function parseAnnotationList(text: string, what: string): unknown[] {
-  const value = parseStoredJson<unknown>(text, what);
+  const value = parseStoredJson(text, what);
   if (!Array.isArray(value)) {
     throw new Error(
       `${what} is not a list of highlights. The file was not modified. ` +
-      'Restore it from a backup, or correct it by hand, then open the book again.',
+        'Restore it from a backup, or correct it by hand, then open the book again.',
     );
   }
   return value;

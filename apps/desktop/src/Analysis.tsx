@@ -33,7 +33,7 @@ async function renderDiagrams(root: HTMLElement, dark: boolean): Promise<void> {
     const pre = block.parentElement;
     if (!pre) continue;
     try {
-      const { svg } = await mermaid.render(`d${Date.now()}-${i}`, block.textContent ?? '');
+      const { svg } = await mermaid.render(`d${Date.now()}-${i}`, block.textContent);
       const holder = document.createElement('div');
       holder.className = 'diagram';
       holder.innerHTML = svg;
@@ -70,7 +70,9 @@ export function Analysis({ dir, chapterIndex }: Props) {
     }
   }, [dir]);
 
-  useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
 
   // An agent writes the file in another window; re-reading on focus is what makes
   // it appear without a manual refresh.
@@ -101,9 +103,10 @@ export function Analysis({ dir, chapterIndex }: Props) {
 
   useEffect(() => {
     if (!html || !body.current) return;
-    const dark = !document.documentElement.matches('[data-theme="light"]')
-      && (document.documentElement.matches('[data-theme="dark"]')
-        || window.matchMedia('(prefers-color-scheme: dark)').matches);
+    const dark =
+      !document.documentElement.matches('[data-theme="light"]') &&
+      (document.documentElement.matches('[data-theme="dark"]') ||
+        window.matchMedia('(prefers-color-scheme: dark)').matches);
     void renderDiagrams(body.current, dark);
   }, [html]);
 
@@ -111,10 +114,20 @@ export function Analysis({ dir, chapterIndex }: Props) {
     return (
       <>
         <div className="pane-head">
-          <button className="btn ghost tiny" onClick={() => { setOpenFile(null); setHtml(''); }}>←</button>
+          <button
+            className="btn ghost tiny"
+            onClick={() => {
+              setOpenFile(null);
+              setHtml('');
+            }}
+          >
+            ←
+          </button>
           <span className="ellipsis">{openFile.name}</span>
           <span className="spacer" />
-          <button className="btn ghost tiny" onClick={() => void revealItemInDir(openFile.path)}>Reveal</button>
+          <button className="btn ghost tiny" onClick={() => void revealItemInDir(openFile.path)}>
+            Reveal
+          </button>
         </div>
         <div className="pane-body">
           {error && <div className="banner error">{error}</div>}
@@ -127,23 +140,33 @@ export function Analysis({ dir, chapterIndex }: Props) {
   return (
     <>
       <div className="pane-head">
-        Analysis<span className="spacer" />{visible.length}
-        <button className="btn ghost tiny" onClick={() => void refresh()} title="Re-read the folder">↻</button>
+        Analysis
+        <span className="spacer" />
+        {visible.length}
+        <button
+          className="btn ghost tiny"
+          onClick={() => void refresh()}
+          title="Re-read the folder"
+        >
+          ↻
+        </button>
       </div>
       <div className="pane-body">
         {error && <div className="banner error">{error}</div>}
         {visible.length === 0 ? (
           <div className="empty">
-            Nothing here yet.<br />
-            Point an agent at <code>analysis/</code> and whatever Markdown it writes
-            shows up here, beside the chapter it belongs to.
+            Nothing here yet.
+            <br />
+            Point an agent at <code>analysis/</code> and whatever Markdown it writes shows up here,
+            beside the chapter it belongs to.
           </div>
         ) : (
           visible.map((file) => (
             <button key={file.path} className="analysis-row" onClick={() => void open(file)}>
               <span className="t">{file.name}</span>
               <span className="meta">
-                {new Date(file.modified * 1000).toLocaleDateString()} · {(file.size / 1024).toFixed(1)} kB
+                {new Date(file.modified * 1000).toLocaleDateString()} ·{' '}
+                {(file.size / 1024).toFixed(1)} kB
               </span>
             </button>
           ))
