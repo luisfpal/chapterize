@@ -50,7 +50,10 @@ to need one, the block model is wrong and that is the thing to fix.
 - Only append a derived name to a chapter title when the TOC label is a bare
   enumerator ("LAW 1", "IV"). Labels that already read as titles are left alone.
 - Stub chapters merge **forward** when something follows (a part divider heads the
-  chapter after it) and backward only at the end.
+  chapter after it) and backward only at the end. A chapter, book, or law number is
+  not a stub: it stays even under 200 characters. When the contents numbers 1, 2, 3
+  in order, `readingChapters` returns that run. The preface and the license are not
+  chapters. `detect` still tiles every block.
 - Markdown emphasis must not sit against a space: `**bold. **` renders literally.
 
 ## Storage rules
@@ -121,4 +124,6 @@ chapter split across files — because a single happy-path fixture cannot. Set
 `CHAPTERIZE_FIXTURES` to a colon-separated list of directories to also run the
 shelf oracles. Without it those oracles are not registered, so a fresh clone
 does not report them as skipped. `verify` does not replace the shelf. No shelf
-path belongs in this repository.
+path belongs in this repository. `packages/core/test/fixtures/pg132.epub` and
+`pg2680.epub` are the two Gutenberg books the body-chapter tests open. Pride and
+Prejudice is read from `~/chz-books/pg1342.epub` when that file is present.

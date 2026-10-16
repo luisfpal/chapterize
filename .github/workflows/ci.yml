@@ -23,8 +23,8 @@ jobs:
       - run: npm run format:check
       - run: npm run lint
       - run: npm run typecheck
-      # npm test runs the parser suite and scripts/verify.mjs. The suite skips
-      # real books when CHAPTERIZE_FIXTURES is unset. verify builds its own.
+      # npm test runs the parser suite and scripts/verify.mjs.
+      # pg132 and pg2680 are in the repo. pg1342 runs only when that file is present.
       - run: npm test
 
   native:

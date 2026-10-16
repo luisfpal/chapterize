@@ -214,7 +214,9 @@ in Node, in the webview, and would run in a CLI unchanged. The Rust side does on
 what a webview cannot: read arbitrary files, write the library, move the original.
 
 `npm test` builds original EPUBs in memory and checks the structures that have
-failed on real books. To also run the suite against your own shelf:
+failed on real books. It also opens `packages/core/test/fixtures/pg132.epub`
+(The Art of War, 13 chapters) and `pg2680.epub` (the Meditations, 12 books).
+To also run the suite against your own shelf:
 
 ```bash
 CHAPTERIZE_FIXTURES=/path/to/epubs npm test

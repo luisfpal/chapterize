@@ -36,10 +36,12 @@ Node 22.15 or newer (`module.registerHooks`). Rust is only needed to build `apps
 |---|---|
 | `packages/core/src/epub.ts` | ZIP to `Book` |
 | `packages/core/src/detect.ts` | `Book` to `CutPoint[]` |
-| `packages/core/src/chapters.ts` | cuts to chapters, and the edits |
+| `packages/core/src/chapters.ts` | cuts to chapters, the numbered run, and the edits |
 | `packages/core/src/titles.ts` | titles that are not the repeated h1 |
 | `packages/core/src/markdown.ts` | one chapter to Markdown |
 | `apps/desktop/src/ingest.ts` | the library folder on disk |
 | `apps/desktop/src-tauri` | filesystem, Kindle window, speech |
 
-Real books are not in the repo. `CHAPTERIZE_FIXTURES` points the parser suite at a shelf. Without it those tests skip, and `npm run verify` still runs.
+`detect` tiles every block, so a preface and a license remain cuts. `readingChapters` is the split the CLI and the desktop import. A contents run numbered 1, 2, 3 in order (the word is chapter, book, or law; roman numerals and ordinals count) is the book. The preface is not a chapter. The last chapter stops at the next contents entry, so the license is not one either. A numbered chapter under 200 characters stays. Without that run, an unnumbered stub still folds forward: a part divider joins the chapter it introduces, and the harbor notes stay two chapters.
+
+`packages/core/test/fixtures/pg132.epub` is The Art of War (13 chapters) and `pg2680.epub` is the Meditations (12 books). Pride and Prejudice is `~/chz-books/pg1342.epub` (61 chapters). That test skips when the file is absent. `CHAPTERIZE_FIXTURES` still points the older shelf oracles at a private directory. Without it those oracles are not registered, and `npm run verify` still runs.
