@@ -90,7 +90,7 @@ A chapter export is the text. A study pack is that chapter turned into something
 npx chapterize study book.epub --out ~/Desktop/study
 ```
 
-`npm install` builds the command. Open any `*-study.html` on the phone. Paste any `*-prompt.md` into Grok. The command does not call a model.
+`npm run cli -- study book.epub --out ~/Desktop/study` is the same command from this repository. There is no build step. Open any `*-study.html` on the phone. Paste any `*-prompt.md` into Grok. The command does not call a model.
 
 `--mode offline` skips the prompt. `--mode prompt` writes only the prompt. `--chapter 4` writes one chapter. Chapters under 15 words are skipped; `--all` keeps them.
 
@@ -108,7 +108,7 @@ The prompt file is optional. It fences the chapter between `CHAPTER-START` and `
 
 ## Tests
 
-`npm test` and `npm run typecheck` pass. The study-pack tests build an EPUB (a nested chapter, a headingless chapter, a cover, a repeated header, a list, an emphasised sentence, and a paragraph that contains the characters `<script>`) and run it through the same parser the app uses. The built `chapterize` command is executed on that file and the HTML and the prompt are read back. A real book is also checked when `CHAPTERIZE_FIXTURES` is set. It was not set here, so that test skipped.
+`npm test` and `npm run typecheck` pass. The study-pack tests build an EPUB (a nested chapter, a headingless chapter, a cover, a repeated header, a list, an emphasised sentence, and a paragraph that contains the characters `<script>`) and run it through the same parser the app uses. The `chapterize` bin (`packages/cli/bin/chapterize.js`) is executed on that file and the HTML and the prompt are read back. A real book is also checked when `CHAPTERIZE_FIXTURES` is set. It was not set here, so that test skipped.
 
 ## Unfinished
 
@@ -123,3 +123,5 @@ A chapter under 15 words is skipped unless you pass `--all` or `--chapter`. A re
 The HTML was not opened on a phone. Tests check that it is a document, that book text cannot become a tag, and that each question’s answer is inside `<details>`.
 
 Nothing copies the folder to the phone. You move `~/Desktop/study` the way you already move files.
+
+After the merge into main, `chapterize study` was run on `packages/core/test/fixtures/pg132.epub` (Project Gutenberg, The Art of War) with `--chapter 2`. It wrote one study HTML, one study Markdown, and one prompt file.
