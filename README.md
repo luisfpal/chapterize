@@ -193,6 +193,39 @@ exact.
 
 ---
 
+## Study packs
+
+One chapter is the right size to study. A summary that skips the middle is not
+a study aid. `chapterize study` writes a pack you can open on a phone.
+
+```bash
+npx chapterize study book.epub --out ~/Desktop/study
+```
+
+Three files per chapter:
+
+| File | What it is |
+|---|---|
+| `003-the-chapter-study.html` | Open this on the phone. Answers stay closed until you try them. |
+| `003-the-chapter-study.md` | The same pack, as plain text. |
+| `003-the-chapter-prompt.md` | Paste the whole file into Grok. Chapterize does not call a model. |
+
+`--mode offline` skips the prompt. `--mode prompt` writes only the prompt.
+`--chapter 4` writes one chapter. Chapters under 15 words — covers, blank
+pages — are skipped; `--all` keeps them.
+
+The outline quotes the book. Every heading and every sentence is in it, in
+order, and a footnote is written under the step that cites it. Why it matters
+is the next section. When the chapter says why, that sentence is the note.
+When it does not, the note names the neighboring step that would be left with
+nothing in front of it, and it is marked as coming from the order of the
+chapter rather than from the author. Questions are recall, then deeper: what
+follows, what fails if a step is dropped, and what a step establishes in your
+own words. The check is a sentence the outline already showed. The prompt
+file is optional. Chapterize does not call a model.
+
+The book is read locally. Nothing in this command is sent anywhere.
+
 ## Development
 
 ```bash

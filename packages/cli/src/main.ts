@@ -16,6 +16,7 @@ import {
 } from './paths.js';
 import { qrArt, startServer } from './serve.js';
 import { writeBundle } from './write.js';
+import { run as runStudyCli } from './study-cli.js';
 
 export interface Io {
   stdout: (s: string) => void;
@@ -280,6 +281,12 @@ export async function execute(argv: string[], io: Io): Promise<number> {
 }
 
 async function entry(): Promise<void> {
+  // `chapterize study ...` is the study-pack command. It is synchronous and
+  // never serves, so it returns before the bundle path below starts.
+  if (process.argv[2] === 'study') {
+    process.exitCode = runStudyCli(process.argv.slice(2));
+    return;
+  }
   const io = realIo();
   try {
     const parsed = parseArgs(process.argv.slice(2));
