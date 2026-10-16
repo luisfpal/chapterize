@@ -115,13 +115,13 @@ Usage:
                                 [--chapter n]... [--all]
 
 offline   Markdown and HTML you can open on a phone. The outline keeps
-          every heading and every sentence. “Why it matters” quotes the
-          author when the chapter gives a reason; otherwise it names the
-          neighboring step. The questions can be answered from the chapter
-          alone. Nothing is sent anywhere.
+          every heading and every sentence. A separate “Why it matters”
+          section quotes the author when the chapter gives a reason;
+          otherwise it names the neighboring step. Questions are recall,
+          then deeper. Nothing is sent anywhere.
 
-prompt    One Markdown file per chapter, ready to paste into Grok.
-          Chapterize does not call a model.
+prompt    One Markdown file per chapter, ready to paste into a model.
+          Optional. Chapterize does not call one.
 
 both      Write all three files. This is the default.
 

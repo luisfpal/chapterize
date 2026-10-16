@@ -16,13 +16,13 @@ npx chapterize study book.epub --out ~/Desktop/study
 
 Offline mode quotes the book. Every heading is a step, nested headings stay nested, and the numbers run 1, 2, 3 without restarting. A chapter with no headings becomes one step per paragraph. List items stay in order under their step. A running header that repeats across chapters is left out; a sentence that merely mentions the title is kept.
 
-“Why it matters” is the author’s own sentence when the chapter says *because*, *therefore*, or *so that*. When the chapter never says why, the note names the neighboring step that would be left with nothing in front of this one, and it is marked as coming from the order, not from the author. That is a fact about the outline. It is not a guess about the author’s motive.
+“Why it matters” is its own section, one line per step. It is the author’s own sentence when the chapter says *because*, *therefore*, or *so that*. When the chapter never says why, the note names the neighboring step that would be left with nothing in front of this one, and it is marked as coming from the order, not from the author. That is a fact about the outline. It is not a guess about the author’s motive.
 
 Key ideas are at most five sentences: a definition, a line the author emphasised, a reason, or the sentence a step opens with. The outline is the complete walk. The ideas are the short list.
 
-Questions are recall, why, what fails if you skip a step, and what comes next. The check is a sentence or a step title from the chapter. In the HTML it sits inside a disclosure, so opening the file does not show the answer.
+Questions are recall, then deeper. Recall asks the reader to finish a sentence. Deeper asks why a step matters, what the next step claims, what a later step loses if this one is skipped, and what a step establishes in the reader’s own words. The check is a sentence the outline already showed, or the order note. In the HTML it sits inside a disclosure, so opening the file does not show the answer.
 
-The prompt file fences the chapter between `CHAPTER-START` and `CHAPTER-END` and tells the model to treat that text as the book, not as instructions. It asks for the same four parts, with nothing skipped and nothing brought in from outside the chapter.
+The prompt file is optional. It fences the chapter between `CHAPTER-START` and `CHAPTER-END` and tells the model to treat that text as the book, not as instructions. It asks for the same four parts, with nothing skipped and nothing brought in from outside the chapter. The command does not call a model.
 
 ## Tests
 
@@ -33,6 +33,8 @@ The prompt file fences the chapter between `CHAPTER-START` and `CHAPTER-END` and
 The desktop window has no Study button. The command is the way to get the files. A button would write the same three files beside the chapter export. It was not added.
 
 The offline “why” can name a neighbor that is a tangent rather than a consequence. The prompt file is there for that case. Making the offline note smarter would mean paraphrasing, which this mode refuses to do.
+
+A chapter whose only heading is its title is one step. Every sentence is still in the outline. There is no next step, so the deeper question about what the next step claims does not appear.
 
 A chapter under 15 words is skipped unless you pass `--all` or `--chapter`. A real one-sentence chapter needs one of those.
 
