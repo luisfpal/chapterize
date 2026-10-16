@@ -118,10 +118,7 @@ export function detectFromHeadings(book: Book, level?: number): Detection {
   // reaches that ratio, and the test used to throw those headings away —
   // the whole file became one chapter. The floor admits a handful of real
   // headings; on a long book the one-third cap still rejects the running header.
-  const cap = Math.max(
-    Math.floor(book.blocks.length / 3),
-    Math.min(book.blocks.length, 12),
-  );
+  const cap = Math.max(Math.floor(book.blocks.length / 3), Math.min(book.blocks.length, 12));
 
   for (const lvl of levels) {
     const cuts = book.blocks

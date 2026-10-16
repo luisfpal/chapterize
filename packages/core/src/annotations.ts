@@ -42,7 +42,8 @@ export function annotationRange(text: string, start: number, end: number): Annot
 
 interface Anchored {
   block: number;
-  quote: string;
+  /** Stored quotes are strings. A corrupt file can hold anything, and that note is kept. */
+  quote: unknown;
   start: number;
   end: number;
 }
@@ -98,8 +99,7 @@ export function reanchorAnnotations<T extends Anchored>(
     const order = blocks
       .map((block, at) => ({ block, at }))
       .filter(({ block }) => block.text.includes(quote))
-      .sort((a, b) => Math.abs(a.at - origin) - Math.abs(b.at - origin)
-        || a.at - b.at);
+      .sort((a, b) => Math.abs(a.at - origin) - Math.abs(b.at - origin) || a.at - b.at);
     const hit = order[0];
     if (!hit) {
       orphaned++;
@@ -129,7 +129,10 @@ export function withHighlights(markdown: string, notes: readonly HighlightNote[]
   for (const note of notes) {
     const quote = note.quote.trim();
     if (!quote) continue;
-    const quoted = quote.split('\n').map((line) => `> ${line}`).join('\n');
+    const quoted = quote
+      .split('\n')
+      .map((line) => `> ${line}`)
+      .join('\n');
     const extra = note.note?.trim();
     blocks.push(extra ? `${quoted}\n\n${extra}` : quoted);
   }

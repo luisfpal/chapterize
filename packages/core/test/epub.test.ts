@@ -82,50 +82,49 @@ describeShelf('The 48 Laws of Power — EPUB 2, NCX, one file per chapter', () =
   const load = lazyBook('Laws of Power');
   const open = () => openEpub(load());
 
-    it('reads EPUB 2 metadata and the NCX table of contents', () => {
-      const book = open();
-      expect(book.metadata.epubVersion).toBe('2.0');
-      expect(book.tocSource).toBe('ncx');
-      expect(book.metadata.title).toContain('48 Laws of Power');
-      expect(book.spine.length).toBe(53);
-    });
+  it('reads EPUB 2 metadata and the NCX table of contents', () => {
+    const book = open();
+    expect(book.metadata.epubVersion).toBe('2.0');
+    expect(book.tocSource).toBe('ncx');
+    expect(book.metadata.title).toContain('48 Laws of Power');
+    expect(book.spine.length).toBe(53);
+  });
 
-    it('detects roughly one chapter per law', () => {
-      const book = open();
-      const { cuts, unresolved } = detectFromToc(book);
-      expect(cuts.length).toBeGreaterThanOrEqual(50);
-      expect(unresolved).toHaveLength(0);
-    });
+  it('detects roughly one chapter per law', () => {
+    const book = open();
+    const { cuts, unresolved } = detectFromToc(book);
+    expect(cuts.length).toBeGreaterThanOrEqual(50);
+    expect(unresolved).toHaveLength(0);
+  });
 
-    it('recovers the real law titles that live in no heading', () => {
-      const book = open();
-      const chapters = deriveTitles(toChapters(detect(book).cuts, book.blocks), book.blocks);
-      const titles = chapters.map((c) => c.title).join('\n');
-      expect(titles).toMatch(/Never Outshine the Master/i);
-      expect(titles).toMatch(/Conceal Your Intentions/i);
-    });
+  it('recovers the real law titles that live in no heading', () => {
+    const book = open();
+    const chapters = deriveTitles(toChapters(detect(book).cuts, book.blocks), book.blocks);
+    const titles = chapters.map((c) => c.title).join('\n');
+    expect(titles).toMatch(/Never Outshine the Master/i);
+    expect(titles).toMatch(/Conceal Your Intentions/i);
+  });
 
-    it('does not name every chapter after the book, which the raw h1 would', () => {
-      const book = open();
-      const chapters = deriveTitles(toChapters(detect(book).cuts, book.blocks), book.blocks);
-      const named = chapters.filter((c) => /^48 Laws of Power$/i.test(c.title));
-      // The h1 "48 Laws of Power" repeats in all 51 chapters, so boilerplate
-      // suppression must stop it becoming their titles. The book's own table of
-      // contents does label its title page that way, and echoing the source there
-      // is correct — so one is expected, and more than one is the bug.
-      expect(named.length).toBeLessThanOrEqual(1);
-      const unique = new Set(chapters.map((c) => c.title.toLowerCase()));
-      expect(unique.size).toBeGreaterThan(chapters.length - 3);
-    });
+  it('does not name every chapter after the book, which the raw h1 would', () => {
+    const book = open();
+    const chapters = deriveTitles(toChapters(detect(book).cuts, book.blocks), book.blocks);
+    const named = chapters.filter((c) => /^48 Laws of Power$/i.test(c.title));
+    // The h1 "48 Laws of Power" repeats in all 51 chapters, so boilerplate
+    // suppression must stop it becoming their titles. The book's own table of
+    // contents does label its title page that way, and echoing the source there
+    // is correct — so one is expected, and more than one is the bug.
+    expect(named.length).toBeLessThanOrEqual(1);
+    const unique = new Set(chapters.map((c) => c.title.toLowerCase()));
+    expect(unique.size).toBeGreaterThan(chapters.length - 3);
+  });
 
-    it('joins a display title split across several elements', () => {
-      const book = open();
-      const chapters = deriveTitles(toChapters(detect(book).cuts, book.blocks), book.blocks);
-      const law7 = chapters.find((c) => /LAW 7\b/i.test(c.title));
-      expect(law7?.title).toMatch(/Get Others to Do the Work/i);
-    });
-  },
-);
+  it('joins a display title split across several elements', () => {
+    const book = open();
+    const chapters = deriveTitles(toChapters(detect(book).cuts, book.blocks), book.blocks);
+    const law7 = chapters.find((c) => /LAW 7\b/i.test(c.title));
+    expect(law7?.title).toMatch(/Get Others to Do the Work/i);
+  });
+});
 
 describeShelf('structural edge cases across the library', () => {
   it('Word Power: 362 spine files collapse into ~29 chapters spanning many files each', () => {
@@ -283,7 +282,7 @@ describeShelf('derived titles say something new', () => {
   });
 });
 
-describeShelf('titles keep the book\'s own wording', () => {
+describeShelf("titles keep the book's own wording", () => {
   it('recovers a name only when the label is a bare enumerator', () => {
     const laws = openEpub(loadBook('Laws of Power'));
     const lawTitles = deriveTitles(

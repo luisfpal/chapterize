@@ -7,7 +7,11 @@ import { CliError } from './errors.js';
  * is the same name to a person looking at both.
  */
 export function bookFolderName(title: string, author?: string): string {
-  const clean = (s: string) => s.replace(/[/\\:*?"<>|]/g, '').replace(/\s+/g, ' ').trim();
+  const clean = (s: string) =>
+    s
+      .replace(/[/\\:*?"<>|]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
   const t = clean(title).slice(0, 70) || 'Untitled';
   const a = author ? clean(author).slice(0, 40) : '';
   const name = a ? `${t} — ${a}` : t;
@@ -63,15 +67,12 @@ export function assertInside(parent: string, child: string): void {
  * An address the phone can open. Prefer Wi-Fi (en0 on a Mac) over tunnels and
  * virtual adapters, which are reachable from this machine and from nowhere else.
  */
-export function lanAddress(
-  interfaces: NodeJS.Dict<NetworkInterfaceInfo[]>,
-): string | null {
+export function lanAddress(interfaces: NodeJS.Dict<NetworkInterfaceInfo[]>): string | null {
   const found: { name: string; address: string }[] = [];
   for (const [name, infos] of Object.entries(interfaces)) {
     if (!infos) continue;
     for (const info of infos) {
-      const family = String(info.family);
-      if (family !== 'IPv4' && family !== '4') continue;
+      if (info.family !== 'IPv4') continue;
       if (info.internal) continue;
       if (info.address.startsWith('169.254.')) continue;
       found.push({ name, address: info.address });
@@ -81,7 +82,9 @@ export function lanAddress(
     const hit = found.find((item) => item.name === name);
     if (hit) return hit.address;
   }
-  const ordinary = found.find((item) => !/^(utun|awdl|bridge|docker|veth|vmnet|tun|llw)/.test(item.name));
+  const ordinary = found.find(
+    (item) => !/^(utun|awdl|bridge|docker|veth|vmnet|tun|llw)/.test(item.name),
+  );
   return ordinary?.address ?? found[0]?.address ?? null;
 }
 
@@ -92,7 +95,7 @@ export function lanAddress(
 export function safeFile(root: string, urlPath: string): string | null {
   // "\" is a separator on Windows. A phone bundle is not a reason to follow it.
   if (urlPath.includes('\0') || urlPath.includes('\\')) return null;
-  const rel = (urlPath === '/' || urlPath === '') ? 'index.html' : urlPath.replace(/^\/+/, '');
+  const rel = urlPath === '/' || urlPath === '' ? 'index.html' : urlPath.replace(/^\/+/, '');
   if (rel.split('/').includes('..')) return null;
   const full = path.resolve(root, rel);
   const diff = path.relative(path.resolve(root), full);

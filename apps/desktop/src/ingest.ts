@@ -1,8 +1,19 @@
 import {
-  openEpub, detect, toChapters, deriveTitles, renderChapter, chapterFilename,
-  mergeStubs, imageFilename, countWords, readingMinutes, PARSER_VERSION, EpubError,
+  openEpub,
+  detect,
+  toChapters,
+  deriveTitles,
+  renderChapter,
+  chapterFilename,
+  mergeStubs,
+  imageFilename,
+  countWords,
+  readingMinutes,
+  PARSER_VERSION,
+  EpubError,
   explainUnresolved,
-  reanchorAnnotations, carryBookState,
+  reanchorAnnotations,
+  carryBookState,
 } from '@chapterize/core';
 import type { CutPoint } from '@chapterize/core';
 import {
@@ -80,7 +91,8 @@ export async function ingest(
   // from the title would write a second copy when the folder had been renamed,
   // and slicing the path at '/' to find the library gets the parent wrong on
   // Windows, where the separator is a backslash.
-  const dir = options.into ?? `${libraryDir}/${bookFolderName(book.metadata.title, book.metadata.author)}`;
+  const dir =
+    options.into ?? `${libraryDir}/${bookFolderName(book.metadata.title, book.metadata.author)}`;
   const files: OutputFile[] = [];
   const names: string[] = [];
   const wordCounts: number[] = [];

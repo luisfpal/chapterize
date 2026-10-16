@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { openEpub } from '@chapterize/core';
+import { must, openEpub } from '@chapterize/core';
 import type { Block, Book } from '@chapterize/core';
 import { buildBundle, chapterBase, prepare } from '../src/bundle.js';
 import { formatLength, renderBody, SIZES } from '../src/html.js';
@@ -43,9 +43,18 @@ describe('a generated book becomes a phone bundle', () => {
     ]);
     expect(prepared.warnings).toEqual([]);
 
-    const first = text(files, `chapters/${chapterBase(prepared.chapters[0]!)}.html`);
-    const second = text(files, `chapters/${chapterBase(prepared.chapters[1]!)}.html`);
-    const third = text(files, `chapters/${chapterBase(prepared.chapters[2]!)}.html`);
+    const first = text(
+      files,
+      `chapters/${chapterBase(must(prepared.chapters[0], 'prepared.chapters[0]'))}.html`,
+    );
+    const second = text(
+      files,
+      `chapters/${chapterBase(must(prepared.chapters[1], 'prepared.chapters[1]'))}.html`,
+    );
+    const third = text(
+      files,
+      `chapters/${chapterBase(must(prepared.chapters[2], 'prepared.chapters[2]'))}.html`,
+    );
     const index = text(files, 'index.html');
     const css = text(files, 'reader.css');
 
@@ -71,7 +80,9 @@ describe('a generated book becomes a phone bundle', () => {
     expect(second).toContain('<h3>A real heading</h3>');
     expect(second).toContain('<ul>');
     expect(second).toContain('<li>First item of the list</li>');
-    expect(second).toContain('<blockquote><p>A quoted line that should stay a quote.</p></blockquote>');
+    expect(second).toContain(
+      '<blockquote><p>A quoted line that should stay a quote.</p></blockquote>',
+    );
     expect(second).toContain('UNIQUE_BETA');
     expect(second).not.toContain('UNIQUE_GAMMA_SENTENCE');
     expect(second).toContain('&lt;Angles&gt;');
@@ -83,7 +94,9 @@ describe('a generated book becomes a phone bundle', () => {
     expect(third).not.toContain('UNIQUE_ALPHA');
     expect(third).toContain('<span class="off">Next</span>');
     expect(third).toContain('End of the book');
-    expect(third).toContain(`Chapter 3 of 3 · ${formatLength(prepared.minutes[2]!)}`);
+    expect(third).toContain(
+      `Chapter 3 of 3 · ${formatLength(must(prepared.minutes[2], 'prepared.minutes[2]'))}`,
+    );
 
     expect(index).toContain('Ada Test');
     expect(index).toContain('3 chapters');
@@ -102,11 +115,15 @@ describe('a generated book becomes a phone bundle', () => {
     expect(css).not.toMatch(/(?:height|min-height|max-height)\s*:\s*100vh/);
     for (const size of SIZES) expect(text(files, 'reader.js')).toContain(String(size));
 
-    const manifest = JSON.parse(text(files, 'book.json')) as { title: string; author: string; chapters: { title: string; file: string }[] };
+    const manifest = JSON.parse(text(files, 'book.json')) as {
+      title: string;
+      author: string;
+      chapters: { title: string; file: string }[];
+    };
     expect(manifest.title).toBe('Phone Fixture');
     expect(manifest.author).toBe('Ada Test');
     expect(manifest.chapters).toHaveLength(3);
-    expect(manifest.chapters[2]!.title).toBe('Marks & <Angles>');
+    expect(must(manifest.chapters[2], 'manifest.chapters[2]').title).toBe('Marks & <Angles>');
     expect(files.some((file) => file.path === 'images/dot.png')).toBe(true);
   });
 
@@ -116,15 +133,20 @@ describe('a generated book becomes a phone bundle', () => {
     expect(third).toContain('href="../epub/003-marks-angles.epub"');
     expect(third).toContain('Open this chapter in Books');
 
-    const epub = files.find((file) => file.path === 'epub/003-marks-angles.epub')!.data;
+    const epub = must(
+      files.find((file) => file.path === 'epub/003-marks-angles.epub'),
+      "files.find((file) => file.path === 'epub/003-marks-angles.epub')",
+    ).data;
     expect(epub[0]).toBe(0x50);
     expect(epub[1]).toBe(0x4b);
-    const method = epub[8]! | (epub[9]! << 8);
-    const flags = epub[6]! | (epub[7]! << 8);
-    const nameLen = epub[26]! | (epub[27]! << 8);
-    const extra = epub[28]! | (epub[29]! << 8);
+    const method = must(epub[8], 'epub[8]') | (must(epub[9], 'epub[9]') << 8);
+    const flags = must(epub[6], 'epub[6]') | (must(epub[7], 'epub[7]') << 8);
+    const nameLen = must(epub[26], 'epub[26]') | (must(epub[27], 'epub[27]') << 8);
+    const extra = must(epub[28], 'epub[28]') | (must(epub[29], 'epub[29]') << 8);
     const name = new TextDecoder().decode(epub.slice(30, 30 + nameLen));
-    const stored = new TextDecoder().decode(epub.slice(30 + nameLen + extra, 30 + nameLen + extra + 20));
+    const stored = new TextDecoder().decode(
+      epub.slice(30 + nameLen + extra, 30 + nameLen + extra + 20),
+    );
     expect({ name, method, flags, extra, stored }).toEqual({
       name: 'mimetype',
       method: 0,
@@ -149,11 +171,13 @@ describe('a generated book becomes a phone bundle', () => {
 describe('book HTML is data', () => {
   it('drops a tag that is not on the whitelist', () => {
     const rendered = renderBody({
-      blocks: [block({
-        tag: 'p',
-        text: 'click',
-        html: '<a href="https://evil.example">click</a>',
-      })],
+      blocks: [
+        block({
+          tag: 'p',
+          text: 'click',
+          html: '<a href="https://evil.example">click</a>',
+        }),
+      ],
       notes: new Map(),
       imageSrc: () => null,
       chapterTitle: 'One',
@@ -167,11 +191,13 @@ describe('book HTML is data', () => {
 
   it('drops an attribute on an otherwise allowed tag', () => {
     const rendered = renderBody({
-      blocks: [block({
-        tag: 'p',
-        text: 'hello',
-        html: '<em onclick="alert(1)">hello</em>',
-      })],
+      blocks: [
+        block({
+          tag: 'p',
+          text: 'hello',
+          html: '<em onclick="alert(1)">hello</em>',
+        }),
+      ],
       notes: new Map(),
       imageSrc: () => null,
       chapterTitle: 'One',

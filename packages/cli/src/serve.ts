@@ -96,7 +96,8 @@ function serveRequest(dir: string, req: IncomingMessage, res: ServerResponse): v
     // <img> does not run a script. Opening the SVG itself would, and it would
     // share this origin with the book. script-src 'none' blocks that, and
     // still lets the file render as an image.
-    headers['Content-Security-Policy'] = "default-src 'none'; script-src 'none'; style-src 'unsafe-inline'";
+    headers['Content-Security-Policy'] =
+      "default-src 'none'; script-src 'none'; style-src 'unsafe-inline'";
   }
   res.writeHead(200, headers);
   if (req.method === 'HEAD') res.end();

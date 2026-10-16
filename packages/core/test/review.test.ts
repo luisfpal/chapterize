@@ -1,12 +1,27 @@
 import { describe, expect, it } from 'vitest';
 import {
-  annotationRange, carryBookState, imageFilename, parseAnnotationList, parseStoredJson,
-  readerCommand, reanchorAnnotations, search, tryParseBookIndex, type Block,
+  annotationRange,
+  carryBookState,
+  imageFilename,
+  must,
+  parseAnnotationList,
+  parseStoredJson,
+  readerCommand,
+  reanchorAnnotations,
+  search,
+  tryParseBookIndex,
+  type Block,
 } from '../src/index.js';
 
 function block(text: string): Block {
   return {
-    spineIndex: 0, path: 'c.xhtml', ids: [], tag: 'p', heading: 0, text, html: text,
+    spineIndex: 0,
+    path: 'c.xhtml',
+    ids: [],
+    tag: 'p',
+    heading: 0,
+    text,
+    html: text,
   };
 }
 
@@ -14,10 +29,13 @@ describe('a highlight stays on the words it was made on', () => {
   it('trims the span so the quote is exactly the sliced text', () => {
     const text = '  rope held  ';
     expect(annotationRange(text, 0, text.length)).toEqual({
-      start: 2, end: 11, quote: 'rope held',
+      start: 2,
+      end: 11,
+      quote: 'rope held',
     });
-    expect(annotationRange(text, 0, text.length)!.quote)
-      .toBe(text.slice(2, 11));
+    expect(
+      must(annotationRange(text, 0, text.length), 'annotationRange(text, 0, text.length)').quote,
+    ).toBe(text.slice(2, 11));
   });
 
   it('rejects a selection that is only space, and ignores offsets past the end', () => {
@@ -28,9 +46,14 @@ describe('a highlight stays on the words it was made on', () => {
 
   it('keeps the second occurrence of a repeated word', () => {
     const blocks = [{ text: 'cat and cat' }];
-    const { kept, orphaned } = reanchorAnnotations(blocks, [{
-      block: 0, quote: 'cat', start: 8, end: 11,
-    }]);
+    const { kept, orphaned } = reanchorAnnotations(blocks, [
+      {
+        block: 0,
+        quote: 'cat',
+        start: 8,
+        end: 11,
+      },
+    ]);
     expect(orphaned).toBe(0);
     expect(kept[0]).toMatchObject({ block: 0, start: 8, end: 11 });
   });
@@ -41,12 +64,22 @@ describe('a highlight stays on the words it was made on', () => {
       { text: 'no animals here' },
       { text: 'the dog slept' },
     ];
-    const { kept, orphaned } = reanchorAnnotations(blocks, [{
-      block: 2, quote: 'cat', start: 4, end: 7,
-    }]);
+    const { kept, orphaned } = reanchorAnnotations(blocks, [
+      {
+        block: 2,
+        quote: 'cat',
+        start: 4,
+        end: 7,
+      },
+    ]);
     expect(orphaned).toBe(0);
-    expect(kept[0]!.block).toBe(0);
-    expect(blocks[0]!.text.slice(kept[0]!.start, kept[0]!.end)).toBe('cat');
+    expect(must(kept[0], 'kept[0]').block).toBe(0);
+    expect(
+      must(blocks[0], 'blocks[0]').text.slice(
+        must(kept[0], 'kept[0]').start,
+        must(kept[0], 'kept[0]').end,
+      ),
+    ).toBe('cat');
   });
 
   it('does not pin an empty quote to the first block', () => {
@@ -60,20 +93,25 @@ describe('a highlight stays on the words it was made on', () => {
 
   it('does not store a negative offset from a corrupt start', () => {
     const text = 'cat and cat';
-    const { kept, orphaned } = reanchorAnnotations([{ text }], [{
-      block: 0, quote: 'cat', start: -3, end: 0,
-    }]);
+    const { kept, orphaned } = reanchorAnnotations(
+      [{ text }],
+      [
+        {
+          block: 0,
+          quote: 'cat',
+          start: -3,
+          end: 0,
+        },
+      ],
+    );
     expect(orphaned).toBe(0);
-    expect(kept[0]!.start).toBeGreaterThanOrEqual(0);
-    expect(text.slice(kept[0]!.start, kept[0]!.end)).toBe('cat');
+    expect(must(kept[0], 'kept[0]').start).toBeGreaterThanOrEqual(0);
+    expect(text.slice(must(kept[0], 'kept[0]').start, must(kept[0], 'kept[0]').end)).toBe('cat');
   });
 
   it('keeps a highlight whose quote is not text, instead of deleting it', () => {
     const note = { block: 0, quote: 12, start: 0, end: 2 };
-    const { kept, orphaned } = reanchorAnnotations(
-      [{ text: '12 men remained' }],
-      [note as unknown as { block: number; quote: string; start: number; end: number }],
-    );
+    const { kept, orphaned } = reanchorAnnotations([{ text: '12 men remained' }], [note]);
     expect(orphaned).toBe(0);
     expect(kept).toEqual([note]);
   });
@@ -89,26 +127,36 @@ describe('a highlight stays on the words it was made on', () => {
 });
 
 describe('find', () => {
-  const blocks = [
-    block('The harbor kept its clock.'),
-    block('İstanbul is a city on the water.'),
+  const blocks = [block('The harbor kept its clock.'), block('İstanbul is a city on the water.')];
+  const chapters = [
+    { start: 0, end: 1 },
+    { start: 1, end: 2 },
   ];
-  const chapters = [{ start: 0, end: 1 }, { start: 1, end: 2 }];
 
   it('marks the matched word, including when the context starts with an ellipsis', () => {
     const padding = 'word '.repeat(20);
     const text = `${padding}harbor ${padding}`;
     const [hit] = search([block(text)], [{ start: 0, end: 1 }], 'Harbor');
     expect(hit).toBeDefined();
-    expect(hit!.context.slice(hit!.at, hit!.at + hit!.length)).toBe('harbor');
-    expect(hit!.context.startsWith('…')).toBe(true);
+    expect(
+      must(hit, 'hit').context.slice(
+        must(hit, 'hit').at,
+        must(hit, 'hit').at + must(hit, 'hit').length,
+      ),
+    ).toBe('harbor');
+    expect(must(hit, 'hit').context.startsWith('…')).toBe(true);
   });
 
   it('does not shift the mark when a letter grows under case folding', () => {
     const [hit] = search(blocks, chapters, 'İstan');
     expect(hit).toBeDefined();
-    expect(hit!.block).toBe(1);
-    expect(hit!.context.slice(hit!.at, hit!.at + hit!.length)).toBe('İstan');
+    expect(must(hit, 'hit').block).toBe(1);
+    expect(
+      must(hit, 'hit').context.slice(
+        must(hit, 'hit').at,
+        must(hit, 'hit').at + must(hit, 'hit').length,
+      ),
+    ).toBe('İstan');
   });
 
   it('ignores a query of a single letter', () => {
@@ -118,7 +166,11 @@ describe('find', () => {
 
 describe('reader keys', () => {
   const idle = {
-    editing: false, lookup: false, speaking: false, note: false, pending: false,
+    editing: false,
+    lookup: false,
+    speaking: false,
+    note: false,
+    pending: false,
   };
 
   it('closes the dictionary instead of leaving the book', () => {
@@ -181,10 +233,10 @@ describe('a book folder across a re-split', () => {
 
   it('names the file when stored JSON cannot be read', () => {
     expect(parseStoredJson('{"ok":true}', 'index.json')).toEqual({ ok: true });
-    expect(() => parseStoredJson('{', '/library/Harbor/annotations.json'))
-      .toThrow(/annotations\.json is not valid JSON/);
-    expect(() => parseStoredJson('{', '/library/Harbor/annotations.json'))
-      .toThrow(/not modified/);
+    expect(() => parseStoredJson('{', '/library/Harbor/annotations.json')).toThrow(
+      /annotations\.json is not valid JSON/,
+    );
+    expect(() => parseStoredJson('{', '/library/Harbor/annotations.json')).toThrow(/not modified/);
   });
 
   it('reports one bad index without throwing, and refuses a file that is not a list of highlights', () => {
@@ -209,9 +261,11 @@ describe('a book folder across a re-split', () => {
     }
 
     expect(parseAnnotationList('[]', 'annotations.json')).toEqual([]);
-    expect(() => parseAnnotationList('{}', '/library/Harbor/annotations.json'))
-      .toThrow(/not a list of highlights/);
-    expect(() => parseAnnotationList('{}', '/library/Harbor/annotations.json'))
-      .toThrow(/not modified/);
+    expect(() => parseAnnotationList('{}', '/library/Harbor/annotations.json')).toThrow(
+      /not a list of highlights/,
+    );
+    expect(() => parseAnnotationList('{}', '/library/Harbor/annotations.json')).toThrow(
+      /not modified/,
+    );
   });
 });

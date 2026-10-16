@@ -13,7 +13,14 @@ export const PARSER_VERSION = 5;
 
 export * from './types.js';
 export { openEpub, EpubError, resolvePath } from './epub.js';
-export { detect, detectFromToc, detectFromHeadings, detectFromSpine, explainUnresolved } from './detect.js';
+export { must } from './must.js';
+export {
+  detect,
+  detectFromToc,
+  detectFromHeadings,
+  detectFromSpine,
+  explainUnresolved,
+} from './detect.js';
 export {
   toChapters,
   splitAt,
@@ -35,9 +42,17 @@ export {
   type RenderOptions,
 } from './markdown.js';
 export {
-  annotationRange, reanchorAnnotations, withHighlights,
-  type HighlightNote, type AnnotationRange,
+  annotationRange,
+  reanchorAnnotations,
+  withHighlights,
+  type HighlightNote,
+  type AnnotationRange,
 } from './annotations.js';
 export { search, type Hit } from './search.js';
 export { readerCommand, type ReaderCommand, type ReaderKeyState } from './reader.js';
-export { carryBookState, parseStoredJson, parseAnnotationList, tryParseBookIndex } from './library.js';
+export {
+  carryBookState,
+  parseStoredJson,
+  parseAnnotationList,
+  tryParseBookIndex,
+} from './library.js';

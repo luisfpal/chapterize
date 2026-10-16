@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Block, CutPoint } from '@chapterize/core';
-import { readingMinutes, splitAt, mergeUp, retitle, annotationRange, readerCommand } from '@chapterize/core';
+import {
+  readingMinutes,
+  splitAt,
+  mergeUp,
+  retitle,
+  annotationRange,
+  readerCommand,
+} from '@chapterize/core';
 import { writeText as copyToClipboard } from '@tauri-apps/plugin-clipboard-manager';
 import { revealItemInDir } from '@tauri-apps/plugin-opener';
 import { native, type Annotation, type BookIndex, type LoadedBook } from './native';
@@ -499,39 +506,83 @@ export function BookView({ book, onBack, onExport }: Props) {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
       if (target.tagName === 'TEXTAREA' || target.tagName === 'INPUT') return;
-      const command = readerCommand(e.key, {
-        editing,
-        lookup: lookup !== null,
-        speaking: speech.speaking,
-        note: note !== null,
-        pending: pending !== null,
-      }, e.metaKey || e.ctrlKey || e.altKey);
+      const command = readerCommand(
+        e.key,
+        {
+          editing,
+          lookup: lookup !== null,
+          speaking: speech.speaking,
+          note: note !== null,
+          pending: pending !== null,
+        },
+        e.metaKey || e.ctrlKey || e.altKey,
+      );
       switch (command.kind) {
-        case 'chapter': go(command.delta); break;
-        case 'scroll': readerRef.current?.scrollBy({ top: command.delta }); break;
-        case 'highlight': capture(); break;
-        case 'mark-read': void toggleFinished(); break;
+        case 'chapter':
+          go(command.delta);
+          break;
+        case 'scroll':
+          readerRef.current?.scrollBy({ top: command.delta });
+          break;
+        case 'highlight':
+          capture();
+          break;
+        case 'mark-read':
+          void toggleFinished();
+          break;
         case 'toggle-edit':
           if (editing) setEditing(false);
           else enterEdit();
           break;
-        case 'search': e.preventDefault(); setTab('search'); break;
-        case 'undo-edit': undo(); break;
-        case 'close-lookup': setLookup(null); break;
-        case 'stop-speech': void speech.stop(); break;
-        case 'close-note': setNote(null); break;
-        case 'close-pending': setPending(null); break;
-        case 'cancel-edit': setEditing(false); setCuts(null); break;
-        case 'back': onBack(); break;
+        case 'search':
+          e.preventDefault();
+          setTab('search');
+          break;
+        case 'undo-edit':
+          undo();
+          break;
+        case 'close-lookup':
+          setLookup(null);
+          break;
+        case 'stop-speech':
+          void speech.stop();
+          break;
+        case 'close-note':
+          setNote(null);
+          break;
+        case 'close-pending':
+          setPending(null);
+          break;
+        case 'cancel-edit':
+          setEditing(false);
+          setCuts(null);
+          break;
+        case 'back':
+          onBack();
+          break;
         case 'text-size':
           setSize((v) => Math.min(26, Math.max(13, v + command.delta)));
           break;
-        case 'ignore': break;
+        case 'ignore':
+          break;
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [capture, editing, enterEdit, go, lookup, note, onBack, pending, speech.speaking, speech.stop, toggleFinished, undo]);
+  }, [
+    capture,
+    editing,
+    enterEdit,
+    go,
+    lookup,
+    note,
+    onBack,
+    pending,
+    speech.speaking,
+    speech.stop,
+    toggleFinished,
+    undo,
+  ]);
 
   if (!chapter) return <div className="empty">This book has no chapters.</div>;
 
@@ -584,15 +635,17 @@ export function BookView({ book, onBack, onExport }: Props) {
                 onClick={() =>
                   void (speech.speaking
                     ? speech.stop()
-                    : speech.start(
-                        book.blocks
-                          .slice(chapter.start, chapter.end)
-                          .map((b) => b.text)
-                          .filter((t) => t.length > 1)
-                          .join('. '),
-                      ).then((err) => {
-                        if (err) say(err);
-                      }))
+                    : speech
+                        .start(
+                          book.blocks
+                            .slice(chapter.start, chapter.end)
+                            .map((b) => b.text)
+                            .filter((t) => t.length > 1)
+                            .join('. '),
+                        )
+                        .then((err) => {
+                          if (err) say(err);
+                        }))
                 }
               >
                 {speech.speaking ? '■ Stop' : '▶ Listen'}

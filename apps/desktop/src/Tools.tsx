@@ -77,19 +77,22 @@ export function useSpeech() {
     setSpeaking(false);
   }, []);
 
-  const start = useCallback(async (text: string): Promise<string | null> => {
-    if (!available) return 'Reading aloud is unavailable on this system.';
-    if (!text.trim()) return null;
-    setSpeaking(true);
-    try {
-      await native.speak(text);
-      return null;
-    } catch (cause) {
-      setSpeaking(false);
-      const detail = cause instanceof Error ? cause.message : String(cause);
-      return `Could not read this chapter aloud: ${detail}`;
-    }
-  }, [available]);
+  const start = useCallback(
+    async (text: string): Promise<string | null> => {
+      if (!available) return 'Reading aloud is unavailable on this system.';
+      if (!text.trim()) return null;
+      setSpeaking(true);
+      try {
+        await native.speak(text);
+        return null;
+      } catch (cause) {
+        setSpeaking(false);
+        const detail = cause instanceof Error ? cause.message : String(cause);
+        return `Could not read this chapter aloud: ${detail}`;
+      }
+    },
+    [available],
+  );
 
   // Speech outlives the window unless it is cancelled on the way out.
   useEffect(

@@ -6,7 +6,8 @@ import { strToU8, zipSync } from 'fflate';
  * parts that have broken real books: a nav, a repeated running head, a note
  * outside the reading flow, and a figure.
  */
-const FILL = 'This sentence exists so the chapter is long enough to survive stub merging, which would otherwise fold a short page into the next one and the bundle would then count the wrong chapters. ';
+const FILL =
+  'This sentence exists so the chapter is long enough to survive stub merging, which would otherwise fold a short page into the next one and the bundle would then count the wrong chapters. ';
 
 const PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',

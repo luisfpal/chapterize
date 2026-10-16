@@ -68,13 +68,32 @@ export default tseslint.config(
     },
   },
   {
-    files: ['scripts/**/*.mjs', 'eslint.config.js'],
+    files: ['scripts/**/*.mjs', 'eslint.config.js', 'packages/*/bin/**/*.js'],
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: 'module',
       globals: {
         console: 'readonly',
         process: 'readonly',
+        URL: 'readonly',
+      },
+    },
+  },
+  {
+    // reader.js runs in the phone browser. It is not a Node script.
+    files: ['packages/cli/assets/**/*.js'],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: 'script',
+      globals: {
+        document: 'readonly',
+        window: 'readonly',
+        localStorage: 'readonly',
+        location: 'readonly',
+        URLSearchParams: 'readonly',
+        requestAnimationFrame: 'readonly',
+        setTimeout: 'readonly',
+        console: 'readonly',
       },
     },
   },

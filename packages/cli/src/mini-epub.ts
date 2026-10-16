@@ -90,9 +90,12 @@ ${rendered.notesHtml}
 </body>
 </html>
 `;
-  const imageItems = images.map((image, i) =>
-    `<item id="img-${i}" href="images/${escapeHtml(image.name)}" media-type="${contentType(image.name)}"/>`,
-  ).join('\n    ');
+  const imageItems = images
+    .map(
+      (image, i) =>
+        `<item id="img-${i}" href="images/${escapeHtml(image.name)}" media-type="${contentType(image.name)}"/>`,
+    )
+    .join('\n    ');
   const creator = book.metadata.author
     ? `\n    <dc:creator>${escapeHtml(book.metadata.author)}</dc:creator>`
     : '';
@@ -151,7 +154,8 @@ function safeImageBasename(imagePath: string): string {
   if (SAFE_IMAGE.test(base) && !base.includes('..')) return base;
   const extMatch = /\.(png|jpe?g|gif|svg|webp)$/i.exec(base);
   const ext = extMatch ? extMatch[0].toLowerCase() : '';
-  const stem = (ext ? base.slice(0, base.length - extMatch![0].length) : base)
+  const stemSource = extMatch ? base.slice(0, base.length - extMatch[0].length) : base;
+  const stem = stemSource
     .normalize('NFKD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
@@ -176,7 +180,8 @@ export function imageFileNames(paths: Iterable<string>): Map<string, string> {
         .replace(/^-+|-+$/g, '')
         .slice(0, 60);
       const ext = name.includes('.') ? name.slice(name.lastIndexOf('.')) : '';
-      const candidate = slug && SAFE_IMAGE.test(slug) && !slug.includes('..') && !used.has(slug) ? slug : '';
+      const candidate =
+        slug && SAFE_IMAGE.test(slug) && !slug.includes('..') && !used.has(slug) ? slug : '';
       // used.size does not change inside this loop. Counting from it would
       // spin forever once image-N was already taken.
       let n = used.size;
@@ -188,4 +193,3 @@ export function imageFileNames(paths: Iterable<string>): Map<string, string> {
   }
   return out;
 }
-

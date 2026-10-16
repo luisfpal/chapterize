@@ -9,12 +9,11 @@ import { fileURLToPath } from 'node:url';
 
 const register = fileURLToPath(new URL('./register.js', import.meta.url));
 const entry = fileURLToPath(new URL('../src/main.ts', import.meta.url));
-const child = spawn(process.execPath, [
-  '--experimental-strip-types',
-  '--import', register,
-  entry,
-  ...process.argv.slice(2),
-], { stdio: 'inherit' });
+const child = spawn(
+  process.execPath,
+  ['--experimental-strip-types', '--import', register, entry, ...process.argv.slice(2)],
+  { stdio: 'inherit' },
+);
 
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.on(signal, () => child.kill(signal));
