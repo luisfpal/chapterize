@@ -227,7 +227,8 @@ function headingless(blocks: Block[], notes: ReadonlyMap<string, string> | undef
     if (!list) return;
     // Keep every item in `sentences`. The title repeats the first one so the
     // step has a name; slicing it off here would drop it from the ideas.
-    if (!list.title && list.sentences.length > 0) list.title = list.sentences[0]!;
+    const first = list.sentences[0];
+    if (!list.title && first !== undefined) list.title = first;
     list = undefined;
   };
 
@@ -296,7 +297,11 @@ function buildRaw(
   for (const block of inChapter) {
     const cited = citations(block, notes, seen);
     if (block.heading > 0 && block.text) {
-      while (stack.length > 0 && stack[stack.length - 1]!.depth >= block.heading) stack.pop();
+      while (stack.length > 0) {
+        const top = stack[stack.length - 1];
+        if (top === undefined || top.depth < block.heading) break;
+        stack.pop();
+      }
       const node: RawStep = {
         depth: block.heading,
         title: block.text,
@@ -374,10 +379,13 @@ function quoteTitle(title: string): string {
 function quotedList(titles: string[]): { text: string; plural: boolean } {
   const extra = Math.max(0, titles.length - 3);
   const shown = titles.slice(0, 3);
-  let text: string;
-  if (shown.length === 1) text = quoteTitle(shown[0]!);
-  else if (shown.length === 2) text = `${quoteTitle(shown[0]!)} and ${quoteTitle(shown[1]!)}`;
-  else text = `${quoteTitle(shown[0]!)}, ${quoteTitle(shown[1]!)}, and ${quoteTitle(shown[2]!)}`;
+  const first = shown[0];
+  if (first === undefined) return { text: '', plural: false };
+  const second = shown[1];
+  const third = shown[2];
+  let text = quoteTitle(first);
+  if (second !== undefined && third !== undefined) text = `${quoteTitle(first)}, ${quoteTitle(second)}, and ${quoteTitle(third)}`;
+  else if (second !== undefined) text = `${quoteTitle(first)} and ${quoteTitle(second)}`;
   if (extra > 0) text += ` (${extra} more)`;
   return { text, plural: titles.length > 1 };
 }
@@ -491,18 +499,22 @@ function selectIdeas(steps: OutlineStep[], blocks: Block[], chapter: Chapter, bo
   }
 
   picked.sort((a, b) => a.pos - b.pos);
-  return picked.map((candidate) => {
-    const step = flat.find((item) => item.step === candidate.step)!;
-    // The card should add a reason, not repeat the sentence the reader just read.
+  const ideas: KeyIdea[] = [];
+  for (const candidate of picked) {
+    const step = flat.find((item) => item.step === candidate.step);
+    // A candidate is built from these steps, so a miss means the outline changed
+    // under us. Skip it rather than invent a card for a step that is gone.
+    if (!step) continue;
     const repeats = candidate.sentence === step.whyItMatters;
-    return {
+    ideas.push({
       sentence: candidate.sentence,
       step: candidate.step,
       where: candidate.where,
       whyItMatters: repeats ? structuralWhy(step, flat) : step.whyItMatters,
       whySource: repeats ? 'structure' : step.whySource,
-    };
-  });
+    });
+  }
+  return ideas;
 }
 
 function recallQuestion(idea: KeyIdea): StudyQuestion {
@@ -1097,8 +1109,8 @@ export function planStudyPacks(book: Book, options: StudyPlanOptions = {}): Stud
   }
 
   const explicit = wanted !== undefined && wanted.length > 0;
-  const selected = explicit
-    ? chapters.filter((chapter) => wanted!.includes(chapter.index + 1))
+  const selected = wanted !== undefined && wanted.length > 0
+    ? chapters.filter((chapter) => wanted.includes(chapter.index + 1))
     : chapters;
 
   const files: StudyFile[] = [];

@@ -36,7 +36,8 @@ interface ParsedStudy {
 }
 
 function take(argv: string[], index: number, flag: string): string {
-  const inline = argv[index]!;
+  const inline = argv[index];
+  if (inline === undefined) throw new Error(`${flag} needs a value.`);
   const eq = inline.indexOf('=');
   if (eq >= 0) return inline.slice(eq + 1);
   const next = argv[index + 1];
@@ -59,7 +60,8 @@ export function parseStudyArgs(argv: string[]): ParsedStudy {
   const positionals: string[] = [];
 
   for (let i = 0; i < argv.length; i++) {
-    const arg = argv[i]!;
+    const arg = argv[i];
+    if (arg === undefined) continue;
     if (arg === '--help' || arg === '-h') {
       help = true;
       continue;

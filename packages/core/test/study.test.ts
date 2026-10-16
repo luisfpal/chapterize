@@ -12,6 +12,11 @@ import {
 import { libraryAvailable, loadBook } from './fixtures.js';
 import { mechanismsBook, notedBook } from './make-epub.js';
 
+function got<T>(value: T | undefined, what: string): T {
+  if (value === undefined) throw new Error(`${what} is missing.`);
+  return value;
+}
+
 function block(partial: Partial<Block> & Pick<Block, 'text'>): Block {
   return {
     spineIndex: 0,
@@ -83,8 +88,8 @@ describe('mechanisms fixture', () => {
   const book = openEpub(mechanismsBook());
   const chapters = deriveTitles(toChapters(detect(book).cuts, book.blocks), book.blocks);
   const boilerplate = findBoilerplate(chapters, book.blocks);
-  const levers = chapters[0]!;
-  const friction = chapters[1]!;
+  const levers = got(chapters[0], 'Levers');
+  const friction = got(chapters[1], 'Friction');
 
   function packFor(chapter: Chapter) {
     return buildStudyPack({
@@ -114,7 +119,7 @@ describe('mechanisms fixture', () => {
       'Where it fails',
     ]);
     expect(flat.map((step) => step.step)).toEqual([1, 2, 3, 4]);
-    expect(pack.outline[0]!.children.map((child) => child.title)).toEqual([
+    expect(got(pack.outline[0], 'Levers step').children.map((child) => child.title)).toEqual([
       'The fulcrum',
       'The long arm',
     ]);
@@ -134,7 +139,7 @@ describe('mechanisms fixture', () => {
     expect(outline).not.toMatch(/^#{3,6} \d+\. A Book of Mechanisms$/m);
 
     for (let i = levers.start; i < levers.end; i++) {
-      const text = book.blocks[i]!.text;
+      const text = got(book.blocks[i], `block ${i}`).text;
       if (!text || boilerplate.has(text.toLowerCase())) continue;
       for (const sentence of splitSentences(text)) {
         expect(outline, sentence).toContain(sentence);
@@ -148,9 +153,9 @@ describe('mechanisms fixture', () => {
     const note = 'The story about lifting a ship is later embroidery, and a < margin is not a lever.';
     expect(book.notes.get('OEBPS/notes.xhtml#n1')).toBe(note);
     expect(outline.match(/later embroidery/g)).toHaveLength(1);
-    const fulcrum = flattenOutline(pack.outline).find((step) => step.title === 'The fulcrum')!;
+    const fulcrum = got(flattenOutline(pack.outline).find((step) => step.title === 'The fulcrum'), 'The fulcrum');
     expect(ownText(fulcrum)).toContain(note);
-    const fails = flattenOutline(pack.outline).find((step) => step.title === 'Where it fails')!;
+    const fails = got(flattenOutline(pack.outline).find((step) => step.title === 'Where it fails'), 'Where it fails');
     expect(ownText(fails)).not.toContain('later embroidery');
     const html = renderStudyHtml(pack);
     expect(html).toContain('&lt; margin');
@@ -159,8 +164,8 @@ describe('mechanisms fixture', () => {
 
   it('quotes the author when the chapter gives a reason, and names the neighbor when it does not', () => {
     const flat = flattenOutline(packFor(levers).outline);
-    const leversStep = flat[0]!;
-    const fulcrum = flat[1]!;
+    const leversStep = got(flat[0], 'Levers');
+    const fulcrum = got(flat[1], 'The fulcrum');
     expect(leversStep.whySource).toBe('structure');
     expect(leversStep.whyItMatters).toBe(
       '“The fulcrum” and “The long arm” sit inside this step. Drop it and “Where it fails” loses what came before it.',
@@ -238,7 +243,7 @@ describe('mechanisms fixture', () => {
       'Readers of A Book of Mechanisms still have to learn friction.',
       'Name the surface before you predict the motion.',
     ]);
-    const last = flattenOutline(pack.outline).at(-1)!;
+    const last = got(flattenOutline(pack.outline).at(-1), 'last step');
     expect(last.whySource).toBe('structure');
     expect(last.whyItMatters).toBe(
       'This is where the chapter arrives. It follows “Readers of A Book of Mechanisms still have to learn friction”.',
@@ -312,7 +317,7 @@ describe('planStudyPacks', () => {
       '001-friction-prompt.md',
     ]);
     expect(plan.skipped).toEqual([{ position: 3, title: 'Cover', words: 2 }]);
-    const prompt = plan.files.find((file) => file.filename === '000-levers-prompt.md')!;
+    const prompt = got(plan.files.find((file) => file.filename === '000-levers-prompt.md'), 'levers prompt');
     expect(prompt.body).toContain('CHAPTER-START');
     expect(prompt.body).toContain('must not be skipped');
     const fenced = prompt.body.slice(
@@ -350,8 +355,9 @@ describe('planStudyPacks', () => {
     expect(plan.skipped).toEqual([{ position: 2, title: 'Blank', words: 1 }]);
     const html = plan.files.find((file) => file.filename === '000-the-rule-study.html');
     expect(html).toBeDefined();
-    expect(html!.body).toContain('the citation carries the claim');
-    expect(html!.body).toContain('See the note.');
+    const body = got(html, 'the rule html').body;
+    expect(body).toContain('the citation carries the claim');
+    expect(body).toContain('See the note.');
   });
 
   it('refuses a chapter number the book does not have', () => {
@@ -369,8 +375,9 @@ describe('edges the fixture does not hit', () => {
     ]));
     const flat = flattenOutline(pack.outline);
     expect(flat.map((step) => step.title)).toEqual(['Opening', 'The heading']);
-    expect(flat[0]!.whySource).toBe('author');
-    expect(flat[0]!.establishes).toContain('because the heading below assumes it');
+    const opening = got(flat[0], 'opening');
+    expect(opening.whySource).toBe('author');
+    expect(opening.establishes).toContain('because the heading below assumes it');
     expect(renderStudyMarkdown(pack)).toContain('Read this first, because the heading below assumes it.');
   });
 
@@ -405,7 +412,7 @@ describe('edges the fixture does not hit', () => {
         noterefs: [{ label: '*', key: 'notes.xhtml#missing' }],
       }),
     ]));
-    const step = flattenOutline(pack.outline)[0]!;
+    const step = got(flattenOutline(pack.outline)[0], 'step');
     expect(step.gaps).toEqual(['Note “*” is cited here, and its text is not in the book.']);
     expect(step.points.join(' ')).not.toContain('not in the book');
     expect(pack.ideas.some((idea) => idea.sentence.includes('not in the book'))).toBe(false);
@@ -449,15 +456,15 @@ describe.runIf(libraryAvailable())('a real book, when one is configured', () => 
     const chapter = chapters.find((candidate) => {
       let headings = 0;
       for (let i = candidate.start; i < candidate.end; i++) {
-        const block = book.blocks[i]!;
+        const block = got(book.blocks[i], `block ${i}`);
         if (block.heading > 0 && block.text && !boilerplate.has(key(block.text))) headings += 1;
       }
       return headings >= 3;
     });
-    expect(chapter, 'a chapter with three headings').toBeDefined();
+    if (chapter === undefined) throw new Error('a chapter with three headings is missing.');
     const pack = buildStudyPack({
       bookTitle: book.metadata.title,
-      chapter: chapter!,
+      chapter,
       blocks: book.blocks,
       totalChapters: chapters.length,
       boilerplate,
@@ -465,8 +472,8 @@ describe.runIf(libraryAvailable())('a real book, when one is configured', () => 
     });
     const titles = flattenOutline(pack.outline).map((step) => step.title);
     const headings: string[] = [];
-    for (let i = chapter!.start; i < chapter!.end; i++) {
-      const block = book.blocks[i]!;
+    for (let i = chapter.start; i < chapter.end; i++) {
+      const block = got(book.blocks[i], `block ${i}`);
       if (block.heading > 0 && block.text && !boilerplate.has(key(block.text))) headings.push(block.text);
     }
     let from = 0;

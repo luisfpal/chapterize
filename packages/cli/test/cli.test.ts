@@ -54,10 +54,12 @@ describe('run', () => {
       '001-friction-study.html',
       '001-friction-study.md',
     ].map((name) => resolve('out', name)).sort());
-    const html = mem.files.get(resolve('out', '000-levers-study.html'))!;
+    const html = mem.files.get(resolve('out', '000-levers-study.html'));
+    if (html === undefined) throw new Error('missing levers html');
     expect(html).toContain('must not be skipped');
     expect(html).not.toMatch(/<script/i);
-    const prompt = mem.files.get(resolve('out', '000-levers-prompt.md'))!;
+    const prompt = mem.files.get(resolve('out', '000-levers-prompt.md'));
+    if (prompt === undefined) throw new Error('missing levers prompt');
     const start = prompt.indexOf('\nCHAPTER-START\n');
     const end = prompt.indexOf('\nCHAPTER-END\n');
     expect(prompt.slice(start, end)).toContain('must not be skipped');
