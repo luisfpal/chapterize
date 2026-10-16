@@ -393,6 +393,43 @@ export function enumeratorBook(): Uint8Array {
   });
 }
 
+/**
+ * Chapter I is shorter than the stub floor. A preface and a license sit
+ * outside the numbered run and are not chapters.
+ */
+export function shortFirstChapterBook(): Uint8Array {
+  const story = xhtml(`
+    <h1 id="preface">Preface</h1>
+    <p>${long('The preface is not a numbered chapter.')}</p>
+    <h1 id="c1">Chapter I</h1>
+    <p>A short opening.</p>
+    <h1 id="c2">Chapter II</h1>
+    <p>${long('The second chapter is long enough to stand on its own.')}</p>
+    <h1 id="license">License</h1>
+    <p>${long('The license is back matter and must not become a chapter.')}</p>
+  `);
+  const nav = xhtml(
+    `
+    <nav epub:type="toc">
+      <ol>
+        <li><a href="story.xhtml#preface">Preface</a></li>
+        <li><a href="story.xhtml#c1">Chapter I</a></li>
+        <li><a href="story.xhtml#c2">Chapter II</a></li>
+        <li><a href="story.xhtml#license">License</a></li>
+      </ol>
+    </nav>
+  `,
+    'xmlns:epub="http://www.idpf.org/2007/ops"',
+  );
+  return pack({
+    title: 'Short Opening',
+    docs: [
+      { id: 'nav', href: 'nav.xhtml', html: nav, properties: 'nav' },
+      { id: 'story', href: 'story.xhtml', html: story },
+    ],
+  });
+}
+
 /** A part divider is not a chapter. It introduces the chapter after it. */
 export function partDividerBook(): Uint8Array {
   const story = xhtml(`

@@ -2,14 +2,12 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import {
   countWords,
-  deriveTitles,
   detect,
   findBoilerplate,
-  mergeStubs,
   must,
+  readingChapters,
   readingMinutes,
   slugify,
-  toChapters,
 } from '@chapterize/core';
 import type { Book, Chapter } from '@chapterize/core';
 import { CliError } from './errors.js';
@@ -35,8 +33,7 @@ export interface BundleFile {
 
 export function prepare(book: Book): Prepared {
   const detection = detect(book);
-  const cuts = mergeStubs(detection.cuts, book.blocks, STUB_CHARS);
-  const chapters = deriveTitles(toChapters(cuts, book.blocks), book.blocks);
+  const chapters = readingChapters(book, detection.cuts, STUB_CHARS);
   const words = chapters.map((chapter) =>
     countWords(
       book.blocks

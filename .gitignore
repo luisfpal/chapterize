@@ -7,6 +7,9 @@ target/
 # Books, and anything that reveals which books. The parser suite reads a real
 # shelf via CHAPTERIZE_FIXTURES; none of it belongs in the repository.
 *.epub
+# Two Gutenberg books the body-chapter tests open. Both are under 1MB.
+!packages/core/test/fixtures/pg132.epub
+!packages/core/test/fixtures/pg2680.epub
 *.azw3
 *.mobi
 library/

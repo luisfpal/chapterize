@@ -15,13 +15,11 @@ import { strToU8, zipSync } from 'fflate';
 import {
   chapterFilename,
   countWords,
-  deriveTitles,
   detect,
-  mergeStubs,
   openEpub,
+  readingChapters,
   readingMinutes,
   renderChapter,
-  toChapters,
 } from '../packages/core/src/index.ts';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -238,9 +236,8 @@ function assertBook() {
   }
 
   // 200 is the stub threshold the desktop importer uses. Below it, a part
-  // divider becomes the chapter a reader opens on.
-  const cuts = mergeStubs(detection.cuts, book.blocks, 200);
-  const chapters = deriveTitles(toChapters(cuts, book.blocks), book.blocks);
+  // divider becomes the chapter a reader opens on. A numbered run is the book.
+  const chapters = readingChapters(book, detection.cuts, 200);
   if (chapters.length !== 3) {
     fail(
       `chapter count: ${chapters.length} (${chapters.map((chapter) => chapter.title).join(' | ')})`,

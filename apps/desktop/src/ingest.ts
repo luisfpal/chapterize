@@ -1,11 +1,10 @@
 import {
   openEpub,
   detect,
-  toChapters,
-  deriveTitles,
   renderChapter,
   chapterFilename,
-  mergeStubs,
+  readingChapters,
+  toChapters,
   imageFilename,
   countWords,
   readingMinutes,
@@ -64,8 +63,7 @@ export async function ingest(
   }
 
   const detection = detect(book);
-  const cuts = mergeStubs(detection.cuts, book.blocks, STUB_CHARS);
-  const chapters = deriveTitles(toChapters(cuts, book.blocks), book.blocks);
+  const chapters = readingChapters(book, detection.cuts, STUB_CHARS);
 
   const warnings: string[] = [];
   if (detection.unresolved.length) {
@@ -250,8 +248,17 @@ export async function resplit(dir: string): Promise<IngestResult & { orphaned: n
  * the file an automatic one would. `analysis/` is untouched — the Rust side
  * refuses to delete anything but `chapters/`.
  */
-export async function saveSplit(book: LoadedBook, cuts: CutPoint[]): Promise<BookIndex> {
-  const chapters = toChapters(cuts, book.blocks);
+export async function saveSplit(
+  book: LoadedBook,
+  cuts: CutPoint[],
+  endAt: number | null = null,
+): Promise<BookIndex> {
+  // A contents run stops before the license. The editor's cuts do not repeat
+  // that boundary, so a save would otherwise extend the last chapter to the end.
+  const limit =
+    endAt !== null && endAt > 0 && endAt < book.blocks.length ? endAt : book.blocks.length;
+  const blocks = book.blocks.slice(0, limit);
+  const chapters = toChapters(cuts, blocks);
   const files: OutputFile[] = [];
   const stored: BookIndex['chapters'] = [];
 

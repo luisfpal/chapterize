@@ -82,6 +82,13 @@ describe('mergeStubs', () => {
     expect(merged.map((point) => point.at)).toEqual([0, 1]);
   });
 
+  it('keeps a numbered chapter below the character floor', () => {
+    const blocks = [para('A short opening.'), para('y'.repeat(250))];
+    const merged = mergeStubs([cut(0, 'Chapter I'), cut(1, 'Chapter II')], blocks, 200);
+    expect(merged.map((point) => point.title)).toEqual(['Chapter I', 'Chapter II']);
+    expect(merged.map((point) => point.at)).toEqual([0, 1]);
+  });
+
   it('keeps a chapter that meets the character floor', () => {
     const blocks = [para('x'.repeat(200)), para('y'.repeat(200))];
     const merged = mergeStubs([cut(0, 'One'), cut(1, 'Two')], blocks, 200);

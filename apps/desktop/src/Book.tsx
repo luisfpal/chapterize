@@ -452,7 +452,7 @@ export function BookView({ book, onBack, onExport }: Props) {
   const commitSplit = useCallback(async () => {
     if (!cuts) return;
     try {
-      const next = await saveSplit(book, cuts);
+      const next = await saveSplit(book, cuts, index.chapters.at(-1)?.end ?? null);
       setIndex(next);
       setCurrent((c) => Math.min(c, next.chapters.length - 1));
       setEditing(false);
@@ -462,7 +462,7 @@ export function BookView({ book, onBack, onExport }: Props) {
     } catch (e) {
       say(e instanceof Error ? e.message : String(e));
     }
-  }, [book, cuts, say]);
+  }, [book, cuts, index.chapters, say]);
 
   /* ── paths for agents ────────────────────────────────────────────── */
 

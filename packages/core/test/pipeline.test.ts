@@ -3,12 +3,11 @@ import {
   annotationRange,
   chapterFilename,
   countWords,
-  deriveTitles,
   detect,
   imageFilename,
-  mergeStubs,
   must,
   openEpub,
+  readingChapters,
   readingMinutes,
   renderChapter,
   toChapters,
@@ -26,6 +25,7 @@ import {
   numberedNoteBook,
   pageListOnlyBook,
   partDividerBook,
+  shortFirstChapterBook,
   shortHeadingBook,
   tocAfterPageList,
   wrappedNavBook,
@@ -38,8 +38,7 @@ import {
 function pipeline(bytes: Uint8Array) {
   const book = openEpub(bytes);
   const detection = detect(book);
-  const cuts = mergeStubs(detection.cuts, book.blocks, 200);
-  const chapters = deriveTitles(toChapters(cuts, book.blocks), book.blocks);
+  const chapters = readingChapters(book, detection.cuts, 200);
   const files = chapters.map((chapter) => {
     const words = countWords(
       book.blocks
@@ -272,6 +271,7 @@ describe('synthetic books through split, markdown, and highlights', () => {
       pairedFigureBook(),
       enumeratorBook(),
       partDividerBook(),
+      shortFirstChapterBook(),
       ncxBook(),
     ]) {
       const book = openEpub(bytes);
